@@ -1,0 +1,29 @@
+---
+all_files_path: "C:/Users/danny/Documents/Bai/activelearning/data/all_files"
+model_predictions_path: "/home"
+export_path: "C:/Users/danny/Documents/Bai/activelearning/data/"
+file_names:
+  image_names: ["t1_imagingVolume_RAI_RESAMPLED_REG_N4_SS_NORM.nii.gz", "T2WI_RAI_RESAMPLED_REG_N4_SS_NORM.nii.gz"]
+  roi_name_in_organ_extraction: "t1_label_RAI_RESAMPLED_BINARY-label_inss.nii.gz"
+  roi_name: "t1_label_RAI_RESAMPLED_BINARY-label.nii.gz"
+  prediction_name: "tumor-pred-label.nii.gz"
+  probability_map_name: "tumor-prob-mask.nii.gz"
+train_dataset_percentage: 0.8
+unique_id: random_query
+random_seed: 0
+active_learning_iteration: 0
+initial_dataset_generator:
+  backend: random #random, SIFT3D
+  m: 40 #size of initial dataset
+uncertainity:
+  backend: [None] #None, bootstrapped, prob_roi, margin
+  switch: [None] #the iteration at which to switch backend
+  K: 16 #number of uncertain data samples to collect
+representativeness: 
+  backend: [None] #None, cosine_similarity
+  switch: [None] #the iteration at which to switch backend
+  k: 8 #number of representative samples to collect
+pseudo_labels:
+  incorporate: False
+  uncertainty_threshold: 1
+  decay_rate: 1
