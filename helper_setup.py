@@ -8,6 +8,7 @@ import nibabel as nib
 import pandas as pd
 import random 
 import time
+import yaml
 
 # IO and file setup
 class ActiveLearner():
@@ -36,9 +37,31 @@ class ActiveLearner():
         if self.config["active_learning_iteration"] == 0:
             return []
         else:
-            pass 
+            current_iteration = self.config["active_learning_iteration"]
+            csvpath_ofinterest = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(current_iteration - 1), "AL_groupings.csv") 
+            df = pd.read_csv(csvpath_ofinterest, dtype = str)
+            return list(df["annotated"]) + list(df["to_annotate"])
+    
+    def get_unannotated_files(self):
+        """
+        Gets all of the patient mrns that have not been annotated based on the
+        log history. This includes patients who have been previously flagged
+        for pseudo labeling. If the iteration number is zero, returns all
+        patient mrns
 
-    def get_x_random_unannotated_files(self, x):
+        Returns
+        -------
+            list: all patient mrns that have not been annotated
+        """
+        all_patients = self.get_all_files()
+        current_iteration = self.config["active_learning_iteration"]
+        if current_iteration == 0:
+            return all_patients
+        else:
+            annotated = self.get_annotated_files()
+            return [x for x in all_patients if x not in annotated]
+
+    def get_x_random_unannotated_files(self, x, seed = None):
         """
         Returns array with x randomly selected patient mrns without annotations
 
@@ -51,8 +74,49 @@ class ActiveLearner():
         -------
             list: randomly selected unannoated patient mrns
         """
-        pass
+        unannotated = self.get_unannotated_files()
+        return self.get_x_random_files_from_subset(x, unannotated, seed = seed)
 
+    def get_x_random_files_from_subset(self, x, subset, seed = None):
+        """
+        Returns array with x randomly selected samples from subset
+
+        Parameters
+        ----------
+        x : int
+            the number of samples to randomly select
+        
+        Returns
+        -------
+            list: randomly selected unannoated patient mrns
+        """
+        np.random.seed(seed)
+        random.seed(seed)
+        np.random.shuffle(subset)
+        return subset[:x]
+
+
+    def get_initial_dataset_from_log(self):
+        """
+        Gets the initial dataset. The iteration must be > 0 as this method
+        pulls from the log history
+
+        Returns
+        -------
+            list : all patient mrns that were part of the initial dataset
+        """
+        if self.config["active_learning_iteration"] != 0:
+            current_iteration = self.config["active_learning_iteration"]
+            csvpath_ofinterest = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(current_iteration - 1), "AL_groupings.csv") 
+            df = pd.read_csv(csvpath_ofinterest, dtype = str)
+            return list(df["initial"])
+        else:
+            raise RuntimeError("Need a log history to call get_initial_dataset_from_log")
+
+    def _check_ascending(self, x):
+        x_copy = x.copy()
+        x_copy.sort()
+        return x_copy == x
 
     # initial dataset generator
     def random_initialization(self):
@@ -100,20 +164,19 @@ class ActiveLearner():
         else:
             raise ValueError("Backend for initial dataset generator not recognized")
         
-
     # uncertainty
     def uncertainty_none(self):
         """
         Returns an array of K randomly selected patient mrns without annotations.
-        This is the identical to if active learning did not select for uncertain
+        This is identical to if active learning did not select for uncertain
         samples
 
         Returns
         -------
             list: patient mrns randomly selected
         """
-        pass 
-
+        return self.get_x_random_unannotated_files(self.config["uncertainty"]["K"], seed = self.config["random_seed"])
+        
     def uncertainty_bootstrapped(self):
         """
         Returns an array of K patient mrns with the most variance across the
@@ -156,10 +219,35 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns 
         """
-        pass 
+        backend_ix = -1
+        current_iteration = self.config["active_learning_iteration"]
+        if self.config["uncertainty"]["switch"][0] == "None":
+            backend_ix = 0
+        else:
+            if len(self.config["uncertainty"]["switch"]) != len(self.config["uncertainty"]["backend"]):
+                raise ValueError("The length of the backend and switch array within the uncertainty parameter must be equal")
+            
+            if not self._check_ascending(self.config["uncertainty"]["switch"]):
+                raise ValueError("The switch array for uncertainty parameter must be in ascending order")
+            
+            for i, switch_i in enumerate(self.config["uncertainty"]["switch"]):
+                if current_iteration >= switch_i:
+                    backend_ix = i
+        
+        selected_backend = self.config["uncertainty"]["backend"][backend_ix]
+        if selected_backend == "None":
+            return selected_backend, self.uncertainty_none()
+        elif selected_backend == "bootstrapped":
+            return selected_backend, self.uncertainty_bootstrapped()
+        elif selected_backend == "prob_roi":
+            return selected_backend, self.uncertainty_prob_roi()
+        elif selected_backend == "margin":
+            return selected_backend, self.uncertainity_margin()
+        else:
+            raise ValueError(selected_backend + " not recognized")            
 
     # representativeness
-    def representativeness_none(subset):
+    def representativeness_none(self, subset):
         """
         Returns an array of k random patient mrns from subset. The size of the subset
         must be larger or equal to k.
@@ -173,9 +261,9 @@ class ActiveLearner():
         -------
         list : k random samples within the subset
         """
-        pass
+        return self.get_x_random_files_from_subset(self.config["representativeness"]["k"], subset, seed = self.config["random_seed"])
 
-    def representativeness_cosine_similarity(subset):
+    def representativeness_cosine_similarity(self, subset):
         """
         Returns an array of k patient mrns from subset that are most representative
         using the cosine similarity function
@@ -192,7 +280,7 @@ class ActiveLearner():
         """
         pass
 
-    def get_representative_samples(subset):
+    def get_representative_samples(self, subset):
         """
         Returns an array of k patient mrns from subset that are most representative
         using the backend specified in the config
@@ -206,14 +294,38 @@ class ActiveLearner():
         -------
         list : k most representative samples within subset
         """
-        pass 
+        backend_ix = -1
+        current_iteration = self.config["active_learning_iteration"]
+        if self.config["representativeness"]["switch"][0] == "None":
+            backend_ix = 0
+        else:
+            if len(self.config["representativeness"]["switch"]) != len(self.config["representativeness"]["backend"]):
+                raise ValueError("The length of the backend and switch array within the representativeness parameter must be equal")
+            
+            if not self._check_ascending(self.config["representativeness"]["switch"]):
+                raise ValueError("The switch array for representativeness parameter must be in ascending order")
+            
+            for i, switch_i in enumerate(self.config["representativeness"]["switch"]):
+                if current_iteration >= switch_i:
+                    backend_ix = i
+        
+        selected_backend = self.config["representativeness"]["backend"][backend_ix]
+        if selected_backend == "None":
+            return selected_backend, self.representativeness_none(subset)
+        elif selected_backend == "cosine_similarity":
+            return selected_backend, self.representativeness_cosine_similarity(subset)
+        else:
+            raise ValueError(selected_backend + " not recognized")       
 
     # pseudo labeled
-    def get_samples_to_pseudo_label(config):
+    def get_samples_to_pseudo_label(self):
         """
         Returns an array of k patient mrns to use predictions as pseudo labels.
         """
-        pass 
+        if self.config["pseudo_labels"]["incorporate"]:
+            pass
+        else:
+            return []
 
 # file logger
 class Logger():
@@ -256,7 +368,8 @@ class Dataset_Builder():
 
     def build_from_log(self, iteration):
         print("Deleting data from other iterations...")
-        self._delete_other_iteration_data()
+        if self.config["delete_other_iterations_when_creating_new"]:
+            self._delete_other_iteration_data()
         log_path = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
             "AL_groupings.csv")
         al_grps = pd.read_csv(log_path, dtype = str)
@@ -321,6 +434,7 @@ class Dataset_Builder():
         learner = ActiveLearner(self.config)
         logger.write_iteration_in_txt_log(self.config["active_learning_iteration"])
 
+        # first iteration will just create an initial dataset
         if self.config["active_learning_iteration"] == 0:
             initial_time = time.time()
             initial_training_dataset = learner.initial_training_dataset()
@@ -336,10 +450,63 @@ class Dataset_Builder():
                 df[x] = [np.nan for i in range(len(initial_training_dataset))]
             
             logger.write_csv_log(df)
+        # subsequent iterations will first select K uncertain samples, k representative samples
+        # from the uncertain subset. Pseudo labels may be incorporated
         else:
-            pass
+            # get the uncertain samples
+            initial_time = time.time()
+            backend, uncertain_samples = learner.get_uncertain_samples()
+            end_time = time.time()
+            logger.write_text_log(len(uncertain_samples), "Found uncertain samples with " + backend + " backend", end_time - initial_time)
 
-        
+            # get the representative samples
+            initial_time = time.time()
+            backend, representative_samples = learner.get_representative_samples(uncertain_samples)
+            end_time = time.time()
+            logger.write_text_log(len(representative_samples), "Found representative samples with " + backend + " backend", end_time - initial_time)
+
+            # get the pseudo label samples
+            initial_time = time.time()
+            pseudo_labels = learner.get_samples_to_pseudo_label()
+            end_time = time.time()
+            logger.write_text_log(len(pseudo_labels), "Found samples to pseudo label", end_time - initial_time)
+
+            # log the results
+            df = pd.DataFrame()
+            annotated = learner.get_annotated_files()
+            toannotate = representative_samples.copy()
+            initial = learner.get_initial_dataset_from_log()
+            all_arrays = [uncertain_samples, representative_samples, pseudo_labels, annotated, toannotate, initial]
+            largest_length = np.max([len(x) for x in all_arrays])
+            
+            for i in range(len(all_arrays)):
+                all_arrays[i] = [x for x in all_arrays[i] if x == x]
+
+            for x in all_arrays:
+                while len(x) != largest_length:
+                    x.append(np.nan)
+            
+            headers = ["uncertain", "representative", "pseudo_label", "annotated", "to_annotate", "initial"]
+            for data, header in zip(all_arrays, headers):
+                df[header] = data
+            
+            logger.write_csv_log(df)
+
+        #update the iteration and save the config file in the data file
+        new_config_path = os.path.join(self.config["export_path"], self.config["unique_id"], "config.yaml")
+        f = open(new_config_path, "w+")
+        new_config = self.config.copy()
+        new_config["active_learning_iteration"] += 1
+        yaml.dump(new_config, f)
+        f.close()
+
+        output_dir = os.path.join(self.config["export_path"], self.config["unique_id"])
+        tomove = ["helper_setup.py", "initial_setup.py"]
+        for x in tomove:
+            shutil.copy(x, os.path.join(output_dir, "temp_" + x))
+            if os.path.exists(os.path.join(output_dir, x)):
+                os.remove(os.path.join(output_dir, x))
+            shutil.move(os.path.join(output_dir, "temp_" + x), os.path.join(output_dir, x))
 
     def _delete_other_iteration_data(self):
         todelete = []

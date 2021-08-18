@@ -15,15 +15,16 @@ active_learning_iteration: 0
 initial_dataset_generator:
   backend: random #random, SIFT3D
   m: 40 #size of initial dataset
-uncertainity:
+uncertainty:
   backend: [None] #None, bootstrapped, prob_roi, margin
   switch: [None] #the iteration at which to switch backend
-  K: 16 #number of uncertain data samples to collect
+  K: 50 #number of uncertain data samples to collect
 representativeness: 
   backend: [None] #None, cosine_similarity
   switch: [None] #the iteration at which to switch backend
-  k: 8 #number of representative samples to collect
+  k: 25 #number of representative samples to collect
 pseudo_labels:
   incorporate: False
   uncertainty_threshold: 1
   decay_rate: 1
+delete_other_iterations_when_creating_new: False
