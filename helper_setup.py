@@ -9,6 +9,7 @@ import pandas as pd
 import random 
 import time
 import yaml
+from glob import glob
 
 # IO and file setup
 class ActiveLearner():
@@ -186,7 +187,7 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from bootstrapped predictions
         """
-        pass 
+        
 
     def uncertainty_prob_roi(self):
         """"
