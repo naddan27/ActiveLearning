@@ -485,10 +485,6 @@ class Dataset_Builder():
             src = os.path.join(self.config["model_predictions_path"], x, self.config["file_names"]["prediction_name"])
             dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
             shutil.copy(src, dest)
-        
-        #split data into train/val sets
-        print("Splitting data into train/val splits")
-        self._train_val_split(datapath)
 
         # check if bootstrapping
         backend_ix = -1
@@ -507,43 +503,57 @@ class Dataset_Builder():
                     backend_ix = i
         
         # if bootstrapping, need to create bootstrapped data paths
-        if self.config["uncertainty"]["backend"][backend_ix] == "bootstrapped":
+        # else just split into train/val sets
+        if self.config["uncertainty"]["backend"][backend_ix] != "bootstrapped":
+            #split data into train/val sets
+            print("Splitting data into train/val splits")
+            self._train_val_split(datapath)
+        else:
             bootstrapped_paths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
                 "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
-                        
-            train_patients = os.listdir(os.path.join(datapath, "Train"))
-            val_patients = os.listdir(os.path.join(datapath, "Val"))
 
-            for i, x in enumerate(bootstrapped_paths):
+            train_patients = []
+            val_patients = []
+
+            #create train val splits for each bootstrapped model
+            for i in range(N_BOOTSTRAPPED_MODELS):
+                t_pt, v_pt = self._get_train_val_patients(datapath, self.config["random_seed"] + (i * 500))
+                train_patients.append(t_pt)
+                val_patients.append(v_pt)
+
+            # bootstrap each split for each bootstrapped model
+            for i, (x, t_pt, v_pt) in enumerate(zip(bootstrapped_paths, train_patients, val_patients)):
                 bootstrapped_train_dir = os.path.join(x, "Train")
                 bootstrapped_val_dir = os.path.join(x, "Val")
 
                 os.makedirs(bootstrapped_train_dir, exist_ok=False)
                 os.makedirs(bootstrapped_val_dir, exist_ok = False)
 
-                bootstrapped_train_pts = resample(train_patients, replace=True, n_samples = len(train_patients), random_state = self.config["random_seed"] + (i * 500))
-                bootstrapped_val_pts = resample(val_patients, replace=True, n_samples = len(val_patients), random_state = self.config["random_seed"] + (i * 500))
+                bootstrapped_train_pts = resample(t_pt, replace=True, n_samples = len(t_pt), random_state = self.config["random_seed"] + (i * 500))
+                bootstrapped_val_pts = resample(v_pt, replace=True, n_samples = len(v_pt), random_state = self.config["random_seed"] + (i * 500))
 
                 already_included = dict()
 
                 for bootstrapped_train_pt in bootstrapped_train_pts:
                     if bootstrapped_train_pt not in already_included:
-                        shutil.copytree(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt))
+                        shutil.copytree(os.path.join(datapath, bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt))
                         already_included[bootstrapped_train_pt] = 1
                     else:
-                        shutil.copytree(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt + "_" + str(already_included[bootstrapped_train_pt])))
+                        shutil.copytree(os.path.join(datapath, bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt + "_" + str(already_included[bootstrapped_train_pt])))
                         already_included[bootstrapped_train_pt] += 1
                 
                 for bootstrapped_val_pt in bootstrapped_val_pts:
                     if bootstrapped_val_pt not in already_included:
-                        shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt))
+                        shutil.copytree(os.path.join(datapath, bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt))
                         already_included[bootstrapped_val_pt] = 1
                     else:
-                        shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_val_pt])))
+                        shutil.copytree(os.path.join(datapath, bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_val_pt])))
                         already_included[bootstrapped_val_pt] += 1
             
-            shutil.rmtree(os.path.join(datapath, "Train"))
-            shutil.rmtree(os.path.join(datapath, "Val"))
+            # remove the full training set and only keep the bootstrapped versions
+            for x in os.listdir(datapath):
+                if x not in ["bootstrapped_" + str(i) for i in range(N_BOOTSTRAPPED_MODELS)]:
+                    shutil.rmtree(os.path.join(datapath, x))
 
         print("Data build from log at")
         print("\t" + datapath)
@@ -637,14 +647,7 @@ class Dataset_Builder():
             shutil.rmtree(x)
     
     def _train_val_split(self, directory):
-        random.seed(self.config["random_seed"])
-        np.random.seed(self.config["random_seed"])
-
-        patients = os.listdir(directory)
-        np.random.shuffle(patients)
-        train_ix_cutoff = int(len(patients) * self.config["train_dataset_percentage"])
-        train_patients = patients[:train_ix_cutoff]
-        val_patients = patients[train_ix_cutoff:]
+        train_patients, val_patients = self._get_train_val_patients(directory, self.config["random_seed"])
 
         os.makedirs(os.path.join(directory, "Train"))
         os.makedirs(os.path.join(directory, "Val"))
@@ -656,4 +659,16 @@ class Dataset_Builder():
             src = os.path.join(directory, x)
             dest = os.path.join(directory, "Val", x)
             shutil.move(src, dest)
+    
+    def _get_train_val_patients(self, directory, seed):
+        random.seed(seed)
+        np.random.seed(seed)
+
+        patients = os.listdir(directory)
+        np.random.shuffle(patients)
+        train_ix_cutoff = int(len(patients) * self.config["train_dataset_percentage"])
+        train_patients = patients[:train_ix_cutoff]
+        val_patients = patients[train_ix_cutoff:]
+
+        return train_patients, val_patients
 
