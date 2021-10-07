@@ -1,7 +1,7 @@
 ---
-all_files_path: "C:/Users/danny/Documents/Bai/activelearning/data/all_files"
+all_files_path: "/al_data/t1_pre/rapno_t1ce_data_w_t2_over65ss_preprocessed-ex_wpreds"
 model_predictions_path: "/home"
-export_path: "C:/Users/danny/Documents/Bai/activelearning/data/"
+export_path: "/al_data/t1_pre"
 file_names:
   image_names: ["t1_imagingVolume_RAI_RESAMPLED_REG_N4_SS_NORM.nii.gz", "T2WI_RAI_RESAMPLED_REG_N4_SS_NORM.nii.gz"]
   roi_name_in_organ_extraction: "t1_label_RAI_RESAMPLED_BINARY-label_inss.nii.gz"
@@ -9,7 +9,7 @@ file_names:
   prediction_name: "tumor-pred-label.nii.gz"
   probability_map_name: "tumor-prob-mask.nii.gz"
 train_dataset_percentage: 0.8
-unique_id: random_query
+unique_id: uncertainity_bootstrapped
 random_seed: 0
 active_learning_iteration: 0
 initial_dataset_generator:
@@ -17,12 +17,12 @@ initial_dataset_generator:
   m: 40 #size of initial dataset
 uncertainty:
   backend: [None] #None, bootstrapped, prob_roi, margin
-  switch: [None] #the iteration at which to switch backend
+  switch: [None] #the iteration at which to switch backend, length of switch and backend must match
   K: 50 #number of uncertain data samples to collect
 representativeness: 
   backend: [None] #None, cosine_similarity
   switch: [None] #the iteration at which to switch backend
-  k: 25 #number of representative samples to collect
+  k: 50 #number of representative samples to collect
 pseudo_labels:
   incorporate: False
   uncertainty_threshold: 1

@@ -10,6 +10,9 @@ import random
 import time
 import yaml
 from glob import glob
+from sklearn.utils import resample
+
+N_BOOTSTRAPPED_MODELS = 4
 
 # IO and file setup
 class ActiveLearner():
@@ -187,7 +190,24 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from bootstrapped predictions
         """
+        # get the list of unannotated patients
+        unannotated_patients = self.get_unannotated_files()
+        variance = []
+
+        for x in unannotated_patients:
+            all_labels_for_patient = glob(os.path.join(self.config("model_predictions_path"), x, self.config["prediction_name"].split(".nii")[0] + "*"))
+            if len(all_labels_for_patient) > N_BOOTSTRAPPED_MODELS:
+                raise AssertionError("There are more identified predictions than allowed")
+
+            all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
+            np_all_label_data_for_patient = np.array(all_label_data_for_patient)
+            variance_array = np.var(np_all_label_data_for_patient, 0)
+            mean_variance = np.mean(variance_array)
+            variance.append(mean_variance)
         
+        # return the k patients with the highest variance
+        return [x for _, x in sorted(zip(variance, unannotated_patients))][-1 * self.config["uncertainty"]["K"]:]
+
 
     def uncertainty_prob_roi(self):
         """"
@@ -198,7 +218,23 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from mean probability of ROI
         """
-        pass 
+        unannotated_patients = self.get_unannotated_files()
+        uncertainties = []
+
+        for x in unannotated_patients:
+            all_prob_for_patient = glob(os.path.join(self.config("model_predictions_path"), x, self.config["probability_map_name"].split(".nii")[0] + "*"))
+            all_groundtruth_for_patient = glob(os.path.join(self.config("all_files_path"), x, self.config["roi_name"]))
+            if len(all_prob_for_patient) > 1:
+                raise AssertionError("There are more identified predictions than allowed")
+            
+            prob_data_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
+            gt_data_for_patient = np.array(nib.load(all_groundtruth_for_patient[0]).dataobj)
+
+            uncertainties.append(np.mean(prob_data_for_patient[gt_data_for_patient == 1]))
+        
+        # return k patients with the lowest uncertainties
+        return [x for _, x in sorted(zip(uncertainties, unannotated_patients))][self.config["uncertainty"]["K"]:]
+
 
     def uncertainity_margin(self):
         """
@@ -209,7 +245,21 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from margin sampling
         """
-        pass 
+        unannotated_patients = self.get_unannotated_files()
+        margins = []
+
+        for x in unannotated_patients:
+            all_prob_for_patient = glob(os.path.join(self.config("model_predictions_path"), x, self.config["probability_map_name"].split(".nii")[0] + "*"))
+            if len(all_prob_for_patient) > 1:
+                raise AssertionError("There are more identified predictions than allowed")
+            
+            prob_data_of_foreground_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
+            prob_data_of_background_for_patient = np.ones(prob_data_of_foreground_for_patient.shape) - prob_data_of_foreground_for_patient
+            margin_data = np.abs(prob_data_of_foreground_for_patient - prob_data_of_background_for_patient)
+            margins.append(np.mean(margin_data))
+        
+        # return k patients with the lowest margins
+        return [x for _, x in sorted(zip(margins, unannotated_patients))][self.config["uncertainty"]["K"]:]
 
     def get_uncertain_samples(self):
         """
@@ -382,50 +432,85 @@ class Dataset_Builder():
         toannotate = [str(x) for x in toannotate if x == x]
         pseudo = [str(x) for x in pseudo if x == x]
 
-        datapath = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
-            "AL_data")
+        datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
+            "AL_data")]
+
+        # if bootstrapping, need to create bootstrapped data paths
+        backend_ix = -1
+        current_iteration = self.config["active_learning_iteration"]
+        if self.config["uncertainty"]["switch"][0] == "None":
+            backend_ix = 0
+        else:
+            if len(self.config["uncertainty"]["switch"]) != len(self.config["uncertainty"]["backend"]):
+                raise ValueError("The length of the backend and switch array within the uncertainty parameter must be equal")
+            
+            if not self._check_ascending(self.config["uncertainty"]["switch"]):
+                raise ValueError("The switch array for uncertainty parameter must be in ascending order")
+            
+            for i, switch_i in enumerate(self.config["uncertainty"]["switch"]):
+                if current_iteration >= switch_i:
+                    backend_ix = i
+        
+        if self.config["uncertainty"][backend_ix] == "bootstrapped":
+            datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
+            "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
 
         #move the files images and true labels
-        for x in tqdm(annotated + toannotate, desc="Moving True Labels and Respective Images"):
-            src_patient_path = os.path.join(self.config["all_files_path"], x)
-            dest_patient_path = os.path.join(datapath, x)
-            os.makedirs(dest_patient_path, exist_ok=True)
+        for datapath in datapaths:
+            annotate_combined_w_toannotate = annotated.copy() + toannotate.copy()
 
-            for img_name in self.config["file_names"]["image_names"]:
-                src = os.path.join(src_patient_path, img_name)
-                dest = os.path.join(dest_patient_path, img_name)
+            if self.config["uncertainty"][backend_ix] == "bootstrapped":
+                annotate_combined_w_toannotate = resample(annotate_combined_w_toannotate, replace=True, n_samples = len(annotate_combined_w_toannotate), random_state = self.config["random_seed"])
+            
+            already_included = dict()
+
+            for x in tqdm(annotate_combined_w_toannotate, desc="Moving True Labels and Respective Images"):
+                src_patient_path = os.path.join(self.config["all_files_path"], x)
+                dest_patient_path = os.path.join(datapath, x)
+                
+                if x in already_included:
+                    dest_patient_path = os.path.join(datapath, x + "_" + str(already_included[x]))
+                    already_included[x] += 1
+                else:
+                    already_included[x] = 1
+                
+                os.makedirs(dest_patient_path, exist_ok=True)
+
+                for img_name in self.config["file_names"]["image_names"]:
+                    src = os.path.join(src_patient_path, img_name)
+                    dest = os.path.join(dest_patient_path, img_name)
+                    shutil.copy(src, dest)
+                
+                src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
+                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
+                shutil.copy(src, dest)
+
+                src = os.path.join(src_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
+                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
                 shutil.copy(src, dest)
             
-            src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
-            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
-            shutil.copy(src, dest)
+            #move the file images and pseudo labels
+            for x in tqdm(pseudo, desc="Moving Pseudo Labels and Respective Images"):
+                src_patient_path = os.path.join(self.config["all_files_path"], x)
+                dest_patient_path = os.path.join(datapath, x)
+                os.makedirs(dest_patient_path, exist_ok=True)
 
-            src = os.path.join(src_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
-            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
-            shutil.copy(src, dest)
-        
-        #move the file images and pseudo labels
-        for x in tqdm(pseudo, desc="Moving Pseudo Labels and Respective Images"):
-            src_patient_path = os.path.join(self.config["all_files_path"], x)
-            dest_patient_path = os.path.join(datapath, x)
-            os.makedirs(dest_patient_path, exist_ok=True)
+                for img_name in self.config["file_names"]["image_names"]:
+                    src = os.path.join(src_patient_path, img_name)
+                    dest = os.path.join(dest_patient_path, img_name)
+                    shutil.copy(src, dest)
+                
+                src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
+                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
+                shutil.copy(src, dest)
 
-            for img_name in self.config["file_names"]["image_names"]:
-                src = os.path.join(src_patient_path, img_name)
-                dest = os.path.join(dest_patient_path, img_name)
+                src = os.path.join(self.config["model_predictions_path"], x, self.config["file_names"]["prediction_name"])
+                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
                 shutil.copy(src, dest)
             
-            src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
-            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
-            shutil.copy(src, dest)
-
-            src = os.path.join(self.config["model_predictions_path"], x, self.config["file_names"]["prediction_name"])
-            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
-            shutil.copy(src, dest)
-        
-        #split data into train/val sets
-        print("Splitting data into train/val splits")
-        self._train_val_split(datapath)
+            #split data into train/val sets
+            print("Splitting data into train/val splits")
+            self._train_val_split(datapath)
 
         print("Data build from log at")
         print("\t" + datapath)
