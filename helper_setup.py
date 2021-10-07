@@ -435,23 +435,63 @@ class Dataset_Builder():
         if self.config["delete_other_iterations_when_creating_new"]:
             print("Deleting data from other iterations...")
             self._delete_other_iteration_data()
+
+        # get the names of the patients to move
         log_path = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
             "AL_groupings.csv")
         al_grps = pd.read_csv(log_path, dtype = str)
-        annotated = al_grps["annotated"]
-        toannotate = al_grps["to_annotate"]
-        pseudo = al_grps["pseudo_label"]
+        annotated = al_grps[~al_grps["annotated"].isnull()]["annotated"]
+        toannotate = al_grps[~al_grps["to_annotate"].isnull()]["to_annotate"]
+        pseudo = al_grps[~al_grps["pseudo_label"].isnull()]["pseudo_label"]
 
-        annotated = [str(x) for x in annotated if x == x]
-        toannotate = [str(x) for x in toannotate if x == x]
-        pseudo = [str(x) for x in pseudo if x == x]
+        #move the files images and true labels
+        datapath = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
+            "AL_data")
 
-        datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
-            "AL_data")]
+        for x in tqdm(annotated + toannotate, desc="Moving True Labels and Respective Images"):
+            src_patient_path = os.path.join(self.config["all_files_path"], x)
+            dest_patient_path = os.path.join(datapath, x)
+            
+            os.makedirs(dest_patient_path, exist_ok=True)
 
-        # if bootstrapping, need to create bootstrapped data paths
+            for img_name in self.config["file_names"]["image_names"]:
+                src = os.path.join(src_patient_path, img_name)
+                dest = os.path.join(dest_patient_path, img_name)
+                shutil.copy(src, dest)
+            
+            src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
+            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
+            shutil.copy(src, dest)
+
+            src = os.path.join(src_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
+            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
+            shutil.copy(src, dest)
+        
+        #move the file images and pseudo labels
+        for x in tqdm(pseudo, desc="Moving Pseudo Labels and Respective Images"):
+            src_patient_path = os.path.join(self.config["all_files_path"], x)
+            dest_patient_path = os.path.join(datapath, x)
+            os.makedirs(dest_patient_path, exist_ok=True)
+
+            for img_name in self.config["file_names"]["image_names"]:
+                src = os.path.join(src_patient_path, img_name)
+                dest = os.path.join(dest_patient_path, img_name)
+                shutil.copy(src, dest)
+            
+            src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
+            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
+            shutil.copy(src, dest)
+
+            src = os.path.join(self.config["model_predictions_path"], x, self.config["file_names"]["prediction_name"])
+            dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
+            shutil.copy(src, dest)
+        
+        #split data into train/val sets
+        print("Splitting data into train/val splits")
+        self._train_val_split(datapath)
+
+        # check if bootstrapping
         backend_ix = -1
-        bootstrapping = False
         current_iteration = self.config["active_learning_iteration"]
         if self.config["uncertainty"]["switch"][0] == "None":
             backend_ix = 0
@@ -466,67 +506,44 @@ class Dataset_Builder():
                 if current_iteration >= switch_i:
                     backend_ix = i
         
+        # if bootstrapping, need to create bootstrapped data paths
         if self.config["uncertainty"]["backend"][backend_ix] == "bootstrapped":
-            datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
+            bootstrapped_paths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
                 "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
-            bootstrapping = True
+                        
+            train_patients = os.listdir(os.path.join(datapath, "Train"))
+            val_patients = os.listdir(os.path.join(datapath, "Val"))
 
-        #move the files images and true labels
-        for i, datapath in enumerate(datapaths):
-            annotate_combined_w_toannotate = annotated.copy() + toannotate.copy()
+            for i, x in enumerate(bootstrapped_paths):
+                bootstrapped_train_dir = os.path.join(x, "Train")
+                bootstrapped_val_dir = os.path.join(x, "Val")
 
-            if bootstrapping:
-                annotate_combined_w_toannotate = resample(annotate_combined_w_toannotate, replace=True, n_samples = len(annotate_combined_w_toannotate), random_state = self.config["random_seed"] + (i * 500))
+                os.makedirs(bootstrapped_train_dir, exist_ok=False)
+                os.makedirs(bootstrapped_val_dir, exist_ok = False)
+
+                bootstrapped_train_pts = resample(train_patients, replace=True, n_samples = len(train_patients), random_state = self.config["random_seed"] + (i * 500))
+                bootstrapped_val_pts = resample(val_patients, replace=True, n_samples = len(val_patients), random_state = self.config["random_seed"] + (i * 500))
+
+                already_included = dict()
+
+                for bootstrapped_train_pt in bootstrapped_train_pts:
+                    if bootstrapped_train_pt not in already_included:
+                        shutil.copy(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt))
+                        already_included[bootstrapped_train_pt] = 1
+                    else:
+                        shutil.copy(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt + "_" + str(already_included[bootstrapped_train_pt])))
+                        already_included[bootstrapped_train_pt] += 1
+                
+                for bootstrapped_val_pt in bootstrapped_val_pts:
+                    if bootstrapped_val_pt not in already_included:
+                        shutil.copy(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt))
+                        already_included[bootstrapped_val_pt] = 1
+                    else:
+                        shutil.copy(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_train_pt])))
+                        already_included[bootstrapped_val_pt] += 1
             
-            already_included = dict()
-
-            for x in tqdm(annotate_combined_w_toannotate, desc="Moving True Labels and Respective Images"):
-                src_patient_path = os.path.join(self.config["all_files_path"], x)
-                dest_patient_path = os.path.join(datapath, x)
-                
-                if x in already_included:
-                    dest_patient_path = os.path.join(datapath, x + "_" + str(already_included[x]))
-                    already_included[x] += 1
-                else:
-                    already_included[x] = 1
-                
-                os.makedirs(dest_patient_path, exist_ok=True)
-
-                for img_name in self.config["file_names"]["image_names"]:
-                    src = os.path.join(src_patient_path, img_name)
-                    dest = os.path.join(dest_patient_path, img_name)
-                    shutil.copy(src, dest)
-                
-                src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
-                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
-                shutil.copy(src, dest)
-
-                src = os.path.join(src_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
-                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
-                shutil.copy(src, dest)
-            
-            #move the file images and pseudo labels
-            for x in tqdm(pseudo, desc="Moving Pseudo Labels and Respective Images"):
-                src_patient_path = os.path.join(self.config["all_files_path"], x)
-                dest_patient_path = os.path.join(datapath, x)
-                os.makedirs(dest_patient_path, exist_ok=True)
-
-                for img_name in self.config["file_names"]["image_names"]:
-                    src = os.path.join(src_patient_path, img_name)
-                    dest = os.path.join(dest_patient_path, img_name)
-                    shutil.copy(src, dest)
-                
-                src = os.path.join(src_patient_path, self.config["file_names"]["roi_name"])
-                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
-                shutil.copy(src, dest)
-
-                src = os.path.join(self.config["model_predictions_path"], x, self.config["file_names"]["prediction_name"])
-                dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
-                shutil.copy(src, dest)
-            
-            #split data into train/val sets
-            print("Splitting data into train/val splits")
-            self._train_val_split(datapath)
+            shutil.rmtree(os.path.join(datapath, "Train"))
+            shutil.rmtree(os.path.join(datapath, "Val"))
 
         print("Data build from log at")
         print("\t" + datapath)
