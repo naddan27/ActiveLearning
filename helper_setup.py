@@ -134,6 +134,7 @@ class ActiveLearner():
         -------
             list: randomly picked patient mrns of size m
         """
+        print("Setting up initial dataset randomly")
         np.random.seed(self.config["random_seed"])
         random.seed(self.config["random_seed"])
         all_patients = self.get_all_files()
@@ -198,8 +199,9 @@ class ActiveLearner():
         unannotated_patients = self.get_unannotated_files()
         variance = []
 
-        for x in unannotated_patients:
-            all_labels_for_patient = glob(os.path.join(self.config("model_predictions_path"), x, self.config["prediction_name"].split(".nii")[0] + "*"))
+        # inner function to get the variance of the predictions from the bootstrapped models
+        def get_variance(patient):
+            all_labels_for_patient = glob(os.path.join(self.config("model_predictions_path"), patient, self.config["prediction_name"].split(".nii")[0] + "*"))
             if len(all_labels_for_patient) > N_BOOTSTRAPPED_MODELS:
                 raise AssertionError("There are more identified predictions than allowed")
 
@@ -207,11 +209,17 @@ class ActiveLearner():
             np_all_label_data_for_patient = np.array(all_label_data_for_patient)
             variance_array = np.var(np_all_label_data_for_patient, 0)
             mean_variance = np.mean(variance_array)
-            variance.append(mean_variance)
+            return mean_variance
+        
+        # calculate the variences of all of the patients
+        if self.config["uncertainity"]["parallel"]:
+            variance = pqdm(unannotated_patients, get_variance, self.config["n_jobs"])
+        else:
+            for patient in tdqm(unannotated_patients):
+                variance.append(get_variance(patient))
         
         # return the k patients with the highest variance
         return [x for _, x in sorted(zip(variance, unannotated_patients))][-1 * self.config["uncertainty"]["K"]:]
-
 
     def uncertainty_prob_roi(self):
         """"
@@ -464,11 +472,11 @@ class Dataset_Builder():
             bootstrapping = True
 
         #move the files images and true labels
-        for datapath in datapaths:
+        for i, datapath in enumerate(datapaths):
             annotate_combined_w_toannotate = annotated.copy() + toannotate.copy()
 
             if bootstrapping:
-                annotate_combined_w_toannotate = resample(annotate_combined_w_toannotate, replace=True, n_samples = len(annotate_combined_w_toannotate), random_state = self.config["random_seed"])
+                annotate_combined_w_toannotate = resample(annotate_combined_w_toannotate, replace=True, n_samples = len(annotate_combined_w_toannotate), random_state = self.config["random_seed"] + (i * 500))
             
             already_included = dict()
 
