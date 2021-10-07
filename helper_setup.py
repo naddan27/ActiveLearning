@@ -418,8 +418,8 @@ class Dataset_Builder():
         self.config = config
 
     def build_from_log(self, iteration):
-        print("Deleting data from other iterations...")
         if self.config["delete_other_iterations_when_creating_new"]:
+            print("Deleting data from other iterations...")
             self._delete_other_iteration_data()
         log_path = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
             "AL_groupings.csv")
