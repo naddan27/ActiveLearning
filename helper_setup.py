@@ -440,9 +440,9 @@ class Dataset_Builder():
         log_path = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
             "AL_groupings.csv")
         al_grps = pd.read_csv(log_path, dtype = str)
-        annotated = al_grps[~al_grps["annotated"].isnull()]["annotated"]
-        toannotate = al_grps[~al_grps["to_annotate"].isnull()]["to_annotate"]
-        pseudo = al_grps[~al_grps["pseudo_label"].isnull()]["pseudo_label"]
+        annotated = list(al_grps[~al_grps["annotated"].isnull()]["annotated"])
+        toannotate = list(al_grps[~al_grps["to_annotate"].isnull()]["to_annotate"])
+        pseudo = list(al_grps[~al_grps["pseudo_label"].isnull()]["pseudo_label"])
 
         #move the files images and true labels
         datapath = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
