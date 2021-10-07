@@ -16,7 +16,7 @@ initial_dataset_generator:
   backend: random #random, SIFT3D
   m: 40 #size of initial dataset
 uncertainty:
-  backend: [None] #None, bootstrapped, prob_roi, margin
+  backend: [bootstrapped] #None, bootstrapped, prob_roi, margin
   switch: [None] #the iteration at which to switch backend, length of switch and backend must match
   K: 50 #number of uncertain data samples to collect
 representativeness: 
