@@ -437,6 +437,7 @@ class Dataset_Builder():
 
         # if bootstrapping, need to create bootstrapped data paths
         backend_ix = -1
+        bootstrapping = False
         current_iteration = self.config["active_learning_iteration"]
         if self.config["uncertainty"]["switch"][0] == "None":
             backend_ix = 0
@@ -454,12 +455,13 @@ class Dataset_Builder():
             if self.config["uncertainty"][backend_ix] == "bootstrapped":
                 datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
                     "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
+                bootstrapping = True
 
         #move the files images and true labels
         for datapath in datapaths:
             annotate_combined_w_toannotate = annotated.copy() + toannotate.copy()
 
-            if self.config["uncertainty"][backend_ix] == "bootstrapped":
+            if bootstrapping:
                 annotate_combined_w_toannotate = resample(annotate_combined_w_toannotate, replace=True, n_samples = len(annotate_combined_w_toannotate), random_state = self.config["random_seed"])
             
             already_included = dict()
