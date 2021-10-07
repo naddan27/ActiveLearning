@@ -528,18 +528,18 @@ class Dataset_Builder():
 
                 for bootstrapped_train_pt in bootstrapped_train_pts:
                     if bootstrapped_train_pt not in already_included:
-                        shutil.copy(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt))
+                        shutil.copytree(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt))
                         already_included[bootstrapped_train_pt] = 1
                     else:
-                        shutil.copy(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt + "_" + str(already_included[bootstrapped_train_pt])))
+                        shutil.copytree(os.path.join(datapath, "Train", bootstrapped_train_pt), os.path.join(bootstrapped_train_dir, bootstrapped_train_pt + "_" + str(already_included[bootstrapped_train_pt])))
                         already_included[bootstrapped_train_pt] += 1
                 
                 for bootstrapped_val_pt in bootstrapped_val_pts:
                     if bootstrapped_val_pt not in already_included:
-                        shutil.copy(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt))
+                        shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt))
                         already_included[bootstrapped_val_pt] = 1
                     else:
-                        shutil.copy(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_train_pt])))
+                        shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_train_pt])))
                         already_included[bootstrapped_val_pt] += 1
             
             shutil.rmtree(os.path.join(datapath, "Train"))
