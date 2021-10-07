@@ -539,7 +539,7 @@ class Dataset_Builder():
                         shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt))
                         already_included[bootstrapped_val_pt] = 1
                     else:
-                        shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_train_pt])))
+                        shutil.copytree(os.path.join(datapath, "Val", bootstrapped_val_pt), os.path.join(bootstrapped_val_dir, bootstrapped_val_pt + "_" + str(already_included[bootstrapped_val_pt])))
                         already_included[bootstrapped_val_pt] += 1
             
             shutil.rmtree(os.path.join(datapath, "Train"))
