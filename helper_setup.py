@@ -451,9 +451,9 @@ class Dataset_Builder():
                 if current_iteration >= switch_i:
                     backend_ix = i
         
-        if self.config["uncertainty"][backend_ix] == "bootstrapped":
-            datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
-            "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
+            if self.config["uncertainty"][backend_ix] == "bootstrapped":
+                datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
+                    "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
 
         #move the files images and true labels
         for datapath in datapaths:
