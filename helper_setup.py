@@ -44,7 +44,7 @@ class ActiveLearner():
             current_iteration = self.config["active_learning_iteration"]
             csvpath_ofinterest = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(current_iteration - 1), "AL_groupings.csv") 
             df = pd.read_csv(csvpath_ofinterest, dtype = str)
-            return list(df["annotated"]) + list(df["to_annotate"])
+            return list(df[~df["annotated"].isnull()]["annotated"]) + list(df[~df["to_annotate"].isnull()]["to_annotate"])
     
     def get_unannotated_files(self):
         """
@@ -63,7 +63,9 @@ class ActiveLearner():
             return all_patients
         else:
             annotated = self.get_annotated_files()
-            return [x for x in all_patients if x not in annotated]
+            # changed
+            # return [x for x in all_patients if x not in annotated]
+            return list(set(all_patients) - set(annotated))
 
     def get_x_random_unannotated_files(self, x, seed = None):
         """
@@ -113,7 +115,7 @@ class ActiveLearner():
             current_iteration = self.config["active_learning_iteration"]
             csvpath_ofinterest = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(current_iteration - 1), "AL_groupings.csv") 
             df = pd.read_csv(csvpath_ofinterest, dtype = str)
-            return list(df["initial"])
+            return list(df[~df["initial"].isnull()]["initial"])
         else:
             raise RuntimeError("Need a log history to call get_initial_dataset_from_log")
 
@@ -527,6 +529,8 @@ class Dataset_Builder():
         logger.write_iteration_in_txt_log(self.config["active_learning_iteration"])
 
         # first iteration will just create an initial dataset
+        total_initial_time = time.time()
+
         if self.config["active_learning_iteration"] == 0:
             initial_time = time.time()
             initial_training_dataset = learner.initial_training_dataset()
@@ -571,18 +575,16 @@ class Dataset_Builder():
             all_arrays = [uncertain_samples, representative_samples, pseudo_labels, annotated, toannotate, initial]
             largest_length = np.max([len(x) for x in all_arrays])
             
-            for i in range(len(all_arrays)):
-                all_arrays[i] = [x for x in all_arrays[i] if x == x]
-
-            for x in all_arrays:
-                while len(x) != largest_length:
-                    x.append(np.nan)
+            all_arrays = [np.concatenate((x, np.empty(largest_length - len(x)) * np.nan)) for x in all_arrays] #make sure all the arrays are same size
             
             headers = ["uncertain", "representative", "pseudo_label", "annotated", "to_annotate", "initial"]
             for data, header in zip(all_arrays, headers):
                 df[header] = data
             
             logger.write_csv_log(df)
+        
+        total_end_time = time.time()
+        logger.write_text_log("", "Total time to build log", total_end_time - total_initial_time)
 
         #update the iteration and save the config file in the data file
         new_config_path = os.path.join(self.config["export_path"], self.config["unique_id"], "config.yaml")
