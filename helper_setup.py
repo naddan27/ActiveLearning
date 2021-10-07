@@ -179,6 +179,7 @@ class ActiveLearner():
         -------
             list: patient mrns randomly selected
         """
+        print("Getting uncertain samples by random selection")
         return self.get_x_random_unannotated_files(self.config["uncertainty"]["K"], seed = self.config["random_seed"])
         
     def uncertainty_bootstrapped(self):
@@ -190,6 +191,7 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from bootstrapped predictions
         """
+        print("Getting uncertain samples by bootstrapping variance selection")
         # get the list of unannotated patients
         unannotated_patients = self.get_unannotated_files()
         variance = []
@@ -218,6 +220,7 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from mean probability of ROI
         """
+        print("Getting uncertain samples by mean probability")
         unannotated_patients = self.get_unannotated_files()
         uncertainties = []
 
@@ -245,6 +248,7 @@ class ActiveLearner():
         -------
             list: most uncertain patient mrns derived from margin sampling
         """
+        print("Getting uncertain samples by least margins")
         unannotated_patients = self.get_unannotated_files()
         margins = []
 
@@ -452,10 +456,10 @@ class Dataset_Builder():
                 if current_iteration >= switch_i:
                     backend_ix = i
         
-            if self.config["uncertainty"][backend_ix] == "bootstrapped":
-                datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
-                    "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
-                bootstrapping = True
+        if self.config["uncertainty"][backend_ix] == "bootstrapped":
+            datapaths = [os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + str(iteration), \
+                "AL_data", "bootstrapped_" + str(i)) for i in range(N_BOOTSTRAPPED_MODELS)]
+            bootstrapping = True
 
         #move the files images and true labels
         for datapath in datapaths:
