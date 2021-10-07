@@ -1,7 +1,7 @@
 ---
-all_files_path: "/al_data/t1_pre/rapno_t1ce_data_w_t2_over65ss_preprocessed-ex_wpreds"
+all_files_path: "/data/t1_pre/rapno_t1ce_data_w_t2_over65ss_preprocessed-ex_wpreds"
 model_predictions_path: "/home"
-export_path: "/al_data/t1_pre"
+export_path: "/data/t1_pre"
 file_names:
   image_names: ["t1_imagingVolume_RAI_RESAMPLED_REG_N4_SS_NORM.nii.gz", "T2WI_RAI_RESAMPLED_REG_N4_SS_NORM.nii.gz"]
   roi_name_in_organ_extraction: "t1_label_RAI_RESAMPLED_BINARY-label_inss.nii.gz"
