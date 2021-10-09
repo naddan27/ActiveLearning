@@ -198,28 +198,34 @@ class ActiveLearner():
         # get the list of unannotated patients
         unannotated_patients = self.get_unannotated_files()
         variance = []
-
-        # inner function to get the variance of the predictions from the bootstrapped models
-        def get_variance(patient):
-            all_labels_for_patient = glob(os.path.join(self.config("model_predictions_path"), patient, self.config["prediction_name"].split(".nii")[0] + "*"))
-            if len(all_labels_for_patient) > N_BOOTSTRAPPED_MODELS:
-                raise AssertionError("There are more identified predictions than allowed")
-
-            all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
-            np_all_label_data_for_patient = np.array(all_label_data_for_patient)
-            variance_array = np.var(np_all_label_data_for_patient, 0)
-            mean_variance = np.mean(variance_array)
-            return mean_variance
         
         # calculate the variences of all of the patients
-        if self.config["uncertainity"]["parallel"]:
-            variance = pqdm(unannotated_patients, get_variance, self.config["n_jobs"])
+        if self.config["uncertainty"]["parallel"]:
+            variance = pqdm(unannotated_patients, self._get_variance, self.config["n_jobs"])
         else:
-            for patient in tdqm(unannotated_patients):
-                variance.append(get_variance(patient))
+            for patient in tqdm(unannotated_patients):
+                variance.append(self._get_variance(patient))
+
+        # create a df of all of the unannotated patients and their variences
+        sorted_patients_variances = np.array([[pt, v] for v, pt in sorted(zip(variance, unannotated_patients))])
+        variance_df = pd.DataFrame(data = sorted_patients_variances, columns = ["Patient_mrn", "Variance"])
+        variance_df["Selected"] = ["N" for i in range(len(unannotated_patients) - self.config["uncertainty"]["K"])] + ["Y" for i in range(self.config["uncertainty"]["K"])]
+        variance_logger = Logger(self.config)
+        variance_logger.write_uncertainty_log(variance_df, "bootstrapped")
         
         # return the k patients with the highest variance
         return [x for _, x in sorted(zip(variance, unannotated_patients))][-1 * self.config["uncertainty"]["K"]:]
+    
+    def _get_variance(self, patient):
+        all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["prediction_name"].split(".nii")[0] + "*"))
+        if len(all_labels_for_patient) > N_BOOTSTRAPPED_MODELS:
+            raise AssertionError("There are more identified predictions than allowed")
+
+        all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
+        np_all_label_data_for_patient = np.array(all_label_data_for_patient)
+        variance_array = np.var(np_all_label_data_for_patient, 0)
+        mean_variance = np.mean(variance_array)
+        return mean_variance
 
     def uncertainty_prob_roi(self):
         """"
@@ -412,6 +418,14 @@ class Logger():
         csvfolder = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + \
             str(self.iteration_number))
         csvpath = os.path.join(csvfolder, "AL_groupings.csv")
+
+        os.makedirs(csvfolder, exist_ok = True)
+        df.to_csv(csvpath, index = False)
+    
+    def write_uncertainty_log(self, df, backend):
+        csvfolder = os.path.join(self.config["export_path"], self.config["unique_id"], "iteration_" + \
+            str(self.iteration_number - 1))
+        csvpath = os.path.join(csvfolder, "uncertainty_" + backend + ".csv")
 
         os.makedirs(csvfolder, exist_ok = True)
         df.to_csv(csvpath, index = False)
