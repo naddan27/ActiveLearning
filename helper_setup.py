@@ -217,7 +217,7 @@ class ActiveLearner():
         return [x for _, x in sorted(zip(variance, unannotated_patients))][-1 * self.config["uncertainty"]["K"]:]
     
     def _get_variance(self, patient):
-        all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["prediction_name"].split(".nii")[0] + "*"))
+        all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
         if len(all_labels_for_patient) > N_BOOTSTRAPPED_MODELS:
             raise AssertionError("There are more identified predictions than allowed")
 
@@ -240,19 +240,26 @@ class ActiveLearner():
         unannotated_patients = self.get_unannotated_files()
         uncertainties = []
 
-        for x in unannotated_patients:
-            all_prob_for_patient = glob(os.path.join(self.config("model_predictions_path"), x, self.config["probability_map_name"].split(".nii")[0] + "*"))
-            all_groundtruth_for_patient = glob(os.path.join(self.config("all_files_path"), x, self.config["roi_name"]))
-            if len(all_prob_for_patient) > 1:
-                raise AssertionError("There are more identified predictions than allowed")
-            
-            prob_data_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
-            gt_data_for_patient = np.array(nib.load(all_groundtruth_for_patient[0]).dataobj)
-
-            uncertainties.append(np.mean(prob_data_for_patient[gt_data_for_patient == 1]))
+        # calculate the mean probability at the ROI of all of the patients
+        if self.config["uncertainty"]["parallel"]:
+            uncertainties = pqdm(unannotated_patients, self._get_mean_prob_at_roi, self.config["n_jobs"])
+        else:
+            for patient in tqdm(unannotated_patients):
+                uncertainties.append(self._get_mean_prob_at_roi(patient))
         
         # return k patients with the lowest uncertainties
         return [x for _, x in sorted(zip(uncertainties, unannotated_patients))][self.config["uncertainty"]["K"]:]
+    
+    def _get_mean_prob_at_roi(self, patient):
+        all_prob_for_patient = glob(os.path.join(self.config("model_predictions_path"), patient, self.config["probability_map_name"].split(".nii")[0] + "*"))
+        all_groundtruth_for_patient = glob(os.path.join(self.config("all_files_path"), patient, self.config["roi_name"]))
+        if len(all_prob_for_patient) > 1:
+            raise AssertionError("There are more identified predictions than allowed")
+        
+        prob_data_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
+        gt_data_for_patient = np.array(nib.load(all_groundtruth_for_patient[0]).dataobj)
+
+        return np.mean(prob_data_for_patient[gt_data_for_patient == 1])
 
 
     def uncertainity_margin(self):
