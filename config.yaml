@@ -10,14 +10,14 @@ file_names:
   prediction_name: "tumor-pred-label.nii.gz"
   probability_map_name: "tumor-prob-mask.nii.gz"
 train_dataset_percentage: 0.8
-unique_id: uncertainity_bootstrapped
+unique_id: uncertainity_prob_ROI
 random_seed: 0
 active_learning_iteration: 0
 initial_dataset_generator:
   backend: random #random, SIFT3D
   m: 40 #size of initial dataset
 uncertainty:
-  backend: [bootstrapped] #None, bootstrapped, prob_roi, margin
+  backend: [prob_roi] #None, bootstrapped, prob_roi, margin
   switch: [None] #the iteration at which to switch backend, length of switch and backend must match
   K: 50 #number of uncertain data samples to collect
   parallel: True
