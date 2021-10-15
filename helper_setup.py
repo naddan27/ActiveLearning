@@ -247,19 +247,28 @@ class ActiveLearner():
             for patient in tqdm(unannotated_patients):
                 uncertainties.append(self._get_mean_prob_at_roi(patient))
         
+        # create a df of all of the unannotated patients and their prob roi
+        sorted_patients_uncertainties = np.array([[pt, v] for v, pt in sorted(zip(uncertainties, unannotated_patients))])
+        uncertainty_df = pd.DataFrame(data = sorted_patients_uncertainties, columns = ["Patient_mrn", "Prob_at_ROI"])
+        uncertainty_df["Selected"] = ["N" for i in range(len(unannotated_patients) - self.config["uncertainty"]["K"])] + ["Y" for i in range(self.config["uncertainty"]["K"])]
+        uncertainty_logger = Logger(self.config)
+        uncertainty_logger.write_uncertainty_log(uncertainty_df, "prob_at_roi")
+        
         # return k patients with the lowest uncertainties
         return [x for _, x in sorted(zip(uncertainties, unannotated_patients))][self.config["uncertainty"]["K"]:]
     
     def _get_mean_prob_at_roi(self, patient):
-        all_prob_for_patient = glob(os.path.join(self.config("model_predictions_path"), patient, self.config["probability_map_name"].split(".nii")[0] + "*"))
-        all_groundtruth_for_patient = glob(os.path.join(self.config("all_files_path"), patient, self.config["roi_name"]))
+        all_prob_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        all_groundtruth_for_patient = glob(os.path.join(self.config["all_files_path"], patient, self.config["file_names"]["roi_name"]))
         if len(all_prob_for_patient) > 1:
             raise AssertionError("There are more identified predictions than allowed")
         
         prob_data_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
         gt_data_for_patient = np.array(nib.load(all_groundtruth_for_patient[0]).dataobj)
 
-        return np.mean(prob_data_for_patient[gt_data_for_patient == 1])
+        if np.sum(gt_data_for_patient) > 0:
+            np.mean(prob_data_for_patient[gt_data_for_patient == 1])
+        return 0
 
 
     def uncertainity_margin(self):
@@ -275,18 +284,32 @@ class ActiveLearner():
         unannotated_patients = self.get_unannotated_files()
         margins = []
 
-        for x in unannotated_patients:
-            all_prob_for_patient = glob(os.path.join(self.config("model_predictions_path"), x, self.config["probability_map_name"].split(".nii")[0] + "*"))
-            if len(all_prob_for_patient) > 1:
-                raise AssertionError("There are more identified predictions than allowed")
-            
-            prob_data_of_foreground_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
-            prob_data_of_background_for_patient = np.ones(prob_data_of_foreground_for_patient.shape) - prob_data_of_foreground_for_patient
-            margin_data = np.abs(prob_data_of_foreground_for_patient - prob_data_of_background_for_patient)
-            margins.append(np.mean(margin_data))
+        # calculate the margins of all of the patients
+        if self.config["uncertainty"]["parallel"]:
+            margins = pqdm(unannotated_patients, self._get_margin, self.config["n_jobs"])
+        else:
+            for patient in tqdm(unannotated_patients):
+                margins.append(self._get_margin(patient))
         
+        # create a df of all of the unannotated patients and their margins
+        sorted_patients_margins = np.array([[pt, v] for v, pt in sorted(zip(margins, unannotated_patients))])
+        uncertainty_df = pd.DataFrame(data = sorted_patients_margins, columns = ["Patient_mrn", "Margins"])
+        uncertainty_df["Selected"] = ["N" for i in range(len(unannotated_patients) - self.config["uncertainty"]["K"])] + ["Y" for i in range(self.config["uncertainty"]["K"])]
+        uncertainty_logger = Logger(self.config)
+        uncertainty_logger.write_uncertainty_log(uncertainty_df, "margins")
+            
         # return k patients with the lowest margins
         return [x for _, x in sorted(zip(margins, unannotated_patients))][self.config["uncertainty"]["K"]:]
+
+    def _get_margin(self, patient):
+        all_prob_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        if len(all_prob_for_patient) > 1:
+            raise AssertionError("There are more identified predictions than allowed")
+        
+        prob_data_of_foreground_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
+        prob_data_of_background_for_patient = np.ones(prob_data_of_foreground_for_patient.shape) - prob_data_of_foreground_for_patient
+        margin_data = np.abs(prob_data_of_foreground_for_patient - prob_data_of_background_for_patient)
+        return np.mean(margin_data)
 
     def get_uncertain_samples(self):
         """
