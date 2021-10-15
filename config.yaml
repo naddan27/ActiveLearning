@@ -1,6 +1,6 @@
 ---
 all_files_path: "/data/t1_pre/rapno_t1ce_data_w_t2_over65ss_preprocessed-ex_wpreds"
-model_predictions_path: "/home"
+model_predictions_path: "/data/t1_pre/for_predictions/subsets/uncertainity_margin/iteration_0"
 export_path: "/data/t1_pre"
 n_jobs: 16
 file_names:
@@ -10,14 +10,14 @@ file_names:
   prediction_name: "tumor-pred-label.nii.gz"
   probability_map_name: "tumor-prob-mask.nii.gz"
 train_dataset_percentage: 0.8
-unique_id: uncertainity_prob_ROI
+unique_id: uncertainity_margin
 random_seed: 0
 active_learning_iteration: 0
 initial_dataset_generator:
   backend: random #random, SIFT3D
   m: 40 #size of initial dataset
 uncertainty:
-  backend: [prob_roi] #None, bootstrapped, prob_roi, margin
+  backend: [margin] #None, bootstrapped, prob_roi, margin
   switch: [None] #the iteration at which to switch backend, length of switch and backend must match
   K: 50 #number of uncertain data samples to collect
   parallel: True
