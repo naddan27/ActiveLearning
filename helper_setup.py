@@ -1,3 +1,5 @@
+# TODO the pseudo file code is bugged
+
 import os 
 import shutil 
 from glob import glob 
@@ -198,8 +200,16 @@ class ActiveLearner():
         # get the list of unannotated patients
         unannotated_patients = self.get_unannotated_files()
         variance = []
+
+        # print the labels that we are looking at
+        print("Model Predictions at...")
+        print("  ", self.config["model_predictions_path"])
+        predicted_names = glob(os.path.join(self.config["model_predictions_path"], unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        print("Using the following probability map names")
+        for x in predicted_names:
+            print("  ", os.path.basename(x))
         
-        # calculate the variences of all of the patients
+        # calculate the variances of all of the patients
         if self.config["uncertainty"]["parallel"]:
             variance = pqdm(unannotated_patients, self._get_variance, self.config["n_jobs"])
         else:
@@ -283,6 +293,13 @@ class ActiveLearner():
         print("Getting uncertain samples by least margins")
         unannotated_patients = self.get_unannotated_files()
         margins = []
+
+        # print the name of the probability map we are looking at
+        print("Model Predictions at...")
+        print("  ", self.config["model_predictions_path"])
+        print("Using the following probability map names")
+        for x in glob(os.path.join(self.config["model_predictions_path"], unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*")):
+            print("  ", os.path.basename(x))
 
         # calculate the margins of all of the patients
         if self.config["uncertainty"]["parallel"]:
@@ -474,6 +491,7 @@ class Logger():
 class Dataset_Builder():
     def __init__(self, config):
         self.config = config
+        self.config["model_predictions_path"] = os.path.join(self.config["model_predictions_path"], "iteration_" + str(self.config["active_learning_iteration"] - 1) )
 
     def build_from_log(self, iteration):
         if self.config["delete_other_iterations_when_creating_new"]:
