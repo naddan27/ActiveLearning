@@ -228,8 +228,6 @@ class ActiveLearner():
     
     def _get_variance(self, patient):
         all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
-        if len(all_labels_for_patient) > N_BOOTSTRAPPED_MODELS:
-            raise AssertionError("There are more identified predictions than allowed")
 
         all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
         np_all_label_data_for_patient = np.array(all_label_data_for_patient)
@@ -281,9 +279,9 @@ class ActiveLearner():
         return 0
 
 
-    def uncertainity_margin(self):
+    def uncertainty_margin(self):
         """
-        Returns an array of K patient mrns with the smallest margin in probability
+        Returns an array of K patient mrns with the largest negative margin in probability
         between the foreground and background.
 
         Returns
@@ -315,8 +313,8 @@ class ActiveLearner():
         uncertainty_logger = Logger(self.config)
         uncertainty_logger.write_uncertainty_log(uncertainty_df, "margins")
             
-        # return k patients with the lowest margins
-        return sorted_patients_margins[:,0][:self.config["uncertainty"]["K"]]
+        # return k patients with the highest margins
+        return sorted_patients_margins[:,0][-1 * self.config["uncertainty"]["K"]:]
 
     def _get_margin(self, patient):
         all_prob_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
@@ -326,7 +324,74 @@ class ActiveLearner():
         prob_data_of_foreground_for_patient = np.array(nib.load(all_prob_for_patient[0]).dataobj)
         prob_data_of_background_for_patient = np.ones(prob_data_of_foreground_for_patient.shape) - prob_data_of_foreground_for_patient
         margin_data = np.abs(prob_data_of_foreground_for_patient - prob_data_of_background_for_patient)
-        return np.mean(margin_data)
+        return -1 * np.mean(margin_data)
+
+    def uncertainty_dropout(self):
+        """
+        Returns an array of K patient mrns with the largest variance/max entropy
+
+        Returns
+        -------
+            list: most uncertain patient mrns derived from dropout predictions
+        """
+        print("Getting uncertain samples by bootstrapping variance selection")
+        # get the list of unannotated patients
+        unannotated_patients = self.get_unannotated_files()
+        metric = []
+
+        # print the labels that we are looking at
+        print("Model Predictions at...")
+        print("  ", self.config["model_predictions_path"])
+        predicted_names = glob(os.path.join(self.config["model_predictions_path"], unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        print("Using the following probability map names")
+        for x in predicted_names:
+            print("  ", os.path.basename(x))
+        
+        # calculate the variances of all of the patients
+        header_names = []
+        acquisition_function = ""
+
+        if self.config["uncertainty"]["if_dropout"] == "variance":
+            header_names = ["Patient_mrn", "Variance"]
+            acquisition_function = "Variance"
+            if self.config["uncertainty"]["parallel"]:
+                metric = pqdm(unannotated_patients, self._get_variance, self.config["n_jobs"])
+            else:
+                for patient in tqdm(unannotated_patients):
+                    metric.append(self._get_variance(patient))
+        elif self.config["uncertainty"]["if_dropout"] == "max_entropy":
+            header_names = ["Patient_mrn", "Max_Entropy"]
+            acquisition_function = "Max_Entropy"
+            if self.config["uncertainty"]["parallel"]:
+                metric = pqdm(unannotated_patients, self._get_max_entropy, self.config["n_jobs"])
+            else:
+                for patient in tqdm(unannotated_patients):
+                    metric.append(self._get_max_entropy(patient))
+
+        # create a df of all of the unannotated patients and their metrics (variance/max_entropy)
+        sorted_patients_metrics = np.array([[pt, v] for v, pt in sorted(zip(metric, unannotated_patients))])
+        metric_df = pd.DataFrame(data = sorted_patients_metrics, columns = header_names)
+        metric_df["Selected"] = ["N" for i in range(len(unannotated_patients) - self.config["uncertainty"]["K"])] + ["Y" for i in range(self.config["uncertainty"]["K"])]
+        metric_logger = Logger(self.config)
+        metric_logger.write_uncertainty_log(metric_df, "dropout_" + acquisition_function)
+        
+        # return the k patients with the highest variance
+        return sorted_patients_metrics[:,0][-1 * self.config["uncertainty"]["K"]:]
+
+    def _get_max_entropy(self, patient):
+        all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+
+        # load all of the data into an array
+        all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
+        np_all_label_data_for_patient = np.array(all_label_data_for_patient)
+
+        # find the mean probability map across all predictions
+        mean_prob_map = np.mean(np_all_label_data_for_patient, axis = 0)
+
+        # get the max entropy: -(xlog(x) + (1-x)(log(1-x)))
+        max_entropy_map = -1 * ((mean_prob_map * np.log(mean_prob_map+0.00000000001)) + ((1-mean_prob_map) * np.log(1-mean_prob_map + 0.00000000001)))
+        mean_max_entropy = np.mean(max_entropy_map)
+        return mean_max_entropy
 
     def get_uncertain_samples(self):
         """
@@ -360,7 +425,9 @@ class ActiveLearner():
         elif selected_backend == "prob_roi":
             return selected_backend, self.uncertainty_prob_roi()
         elif selected_backend == "margin":
-            return selected_backend, self.uncertainity_margin()
+            return selected_backend, self.uncertainty_margin()
+        elif selected_backend == "dropout":
+            return selected_backend, self.uncertainty_dropout()
         else:
             raise ValueError(selected_backend + " not recognized")            
 
