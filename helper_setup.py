@@ -20,6 +20,7 @@ N_BOOTSTRAPPED_MODELS = 4
 class ActiveLearner():
     def __init__(self, config):
         self.config = config
+        self.iteration_path = os.path.join(self.config['model_predictions_path'], 'iteration_'+ str(self.config['active_learning_iteration'] - 1))
     
     def get_all_files(self):
         """
@@ -203,8 +204,8 @@ class ActiveLearner():
 
         # print the labels that we are looking at
         print("Model Predictions at...")
-        print("  ", self.config["model_predictions_path"])
-        predicted_names = glob(os.path.join(self.config["model_predictions_path"], unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        print("  ", self.iteration_path)
+        predicted_names = glob(os.path.join(self.iteration_path, unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
         print("Using the following probability map names")
         for x in predicted_names:
             print("  ", os.path.basename(x))
@@ -227,7 +228,7 @@ class ActiveLearner():
         return sorted_patients_variances[:,0][-1 * self.config["uncertainty"]["K"]:]
     
     def _get_variance(self, patient):
-        all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        all_labels_for_patient = glob(os.path.join(self.iteration_path, patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
 
         all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
         np_all_label_data_for_patient = np.array(all_label_data_for_patient)
@@ -266,7 +267,7 @@ class ActiveLearner():
         return sorted_patients_uncertainties[:, 0][:self.config["uncertainty"]["K"]]
     
     def _get_mean_prob_at_roi(self, patient):
-        all_prob_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        all_prob_for_patient = glob(os.path.join(self.iteration_path, patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
         all_groundtruth_for_patient = glob(os.path.join(self.config["all_files_path"], patient, self.config["file_names"]["roi_name"]))
         if len(all_prob_for_patient) > 1:
             raise AssertionError("There are more identified predictions than allowed")
@@ -294,9 +295,9 @@ class ActiveLearner():
 
         # print the name of the probability map we are looking at
         print("Model Predictions at...")
-        print("  ", self.config["model_predictions_path"])
+        print("  ", self.iteration_path)
         print("Using the following probability map names")
-        for x in glob(os.path.join(self.config["model_predictions_path"], unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*")):
+        for x in glob(os.path.join(self.iteration_path, unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*")):
             print("  ", os.path.basename(x))
 
         # calculate the margins of all of the patients
@@ -317,7 +318,7 @@ class ActiveLearner():
         return sorted_patients_margins[:,0][-1 * self.config["uncertainty"]["K"]:]
 
     def _get_margin(self, patient):
-        all_prob_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        all_prob_for_patient = glob(os.path.join(self.iteration_path, patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
         if len(all_prob_for_patient) > 1:
             raise AssertionError("There are more identified predictions than allowed")
         
@@ -341,8 +342,8 @@ class ActiveLearner():
 
         # print the labels that we are looking at
         print("Model Predictions at...")
-        print("  ", self.config["model_predictions_path"])
-        predicted_names = glob(os.path.join(self.config["model_predictions_path"], unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        print("  ", self.iteration_path)
+        predicted_names = glob(os.path.join(self.iteration_path, unannotated_patients[0], self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
         print("Using the following probability map names")
         for x in predicted_names:
             print("  ", os.path.basename(x))
@@ -379,7 +380,7 @@ class ActiveLearner():
         return sorted_patients_metrics[:,0][-1 * self.config["uncertainty"]["K"]:]
 
     def _get_max_entropy(self, patient):
-        all_labels_for_patient = glob(os.path.join(self.config["model_predictions_path"], patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        all_labels_for_patient = glob(os.path.join(self.iteration_path, patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
 
         # load all of the data into an array
         all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
@@ -558,7 +559,7 @@ class Logger():
 class Dataset_Builder():
     def __init__(self, config):
         self.config = config
-        self.config["model_predictions_path"] = os.path.join(self.config["model_predictions_path"], "iteration_" + str(self.config["active_learning_iteration"] - 1) )
+        self.iteration_path = os.path.join(self.config["model_predictions_path"], "iteration_" + str(self.config["active_learning_iteration"] - 1) )
 
     def build_from_log(self, iteration):
         if self.config["delete_other_iterations_when_creating_new"]:
@@ -611,7 +612,7 @@ class Dataset_Builder():
             dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
             shutil.copy(src, dest)
 
-            src = os.path.join(self.config["model_predictions_path"], x, self.config["file_names"]["prediction_name"])
+            src = os.path.join(self.iteration_path, x, self.config["file_names"]["prediction_name"])
             dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
             shutil.copy(src, dest)
 
