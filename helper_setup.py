@@ -385,12 +385,14 @@ class ActiveLearner():
 
         # calculate distance to reference patient across all feature vectors
         ref_patient_values = self.scaled_patient_feature_values[patient]
-        all_patient_values = np.array(list(self.scaled_patient_feature_values.values()))
+        sorted_patients = sorted(self.scaled_patient_feature_values.keys())
+        all_patient_values = np.array([self.scaled_patient_feature_values[sorted_patient]
+                                       for sorted_patient in sorted_patients])
         array_distances = self.calculate_array_distances(all_patient_values, ref_patient_values)
 
         # put in dataframe
         df = pd.DataFrame({
-            'patient': self.scaled_patient_feature_values.keys(),
+            'patient': sorted_patients,
             'ref_patient': patient,
             'array_distances': list(array_distances),
         })
