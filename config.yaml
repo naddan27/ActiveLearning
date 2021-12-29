@@ -15,8 +15,9 @@ unique_id: uncertainity_dropout_var
 random_seed: 0
 active_learning_iteration: 0
 initial_dataset_generator:
-  backend: random #random, SIFT3D
+  backend: random #random, feature_description_initialization
   m: 40 #size of initial dataset
+  farthest_metric: mean #mean or minimum, for how to aggregate distances to find farthest patient
 uncertainty:
   backend: [dropout] #None, bootstrapped, prob_roi, margin, dropout
   switch: [None] #the iteration at which to switch backend, length of switch and backend must match

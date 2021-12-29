@@ -11,8 +11,10 @@ import pandas as pd
 import random 
 import time
 import yaml
-from glob import glob
 from sklearn.utils import resample
+import SimpleITK as sitk
+from radiomics import firstorder, glcm, shape, glszm, glrlm, ngtdm, gldm
+
 
 N_BOOTSTRAPPED_MODELS = 4
 
@@ -21,7 +23,10 @@ class ActiveLearner():
     def __init__(self, config):
         self.config = config
         self.iteration_path = os.path.join(self.config['model_predictions_path'], 'iteration_'+ str(self.config['active_learning_iteration'] - 1))
-    
+        # initialize empty dicts to store patient feature values
+        self.patient_feature_values = {}
+        self.scaled_patient_feature_values = {}
+
     def get_all_files(self):
         """
         Gets all of the patient mrns in the data folder
@@ -104,6 +109,55 @@ class ActiveLearner():
         np.random.shuffle(subset)
         return subset[:x]
 
+    def get_images(self, patient):
+        """
+        Gets images for given patient mrn
+
+        Returns
+        -------
+            list of sitk images for patient
+        """
+        image_paths = [os.path.join(self.config['all_files_path'], patient, image_path)
+                       for image_path in self.config['file_names']['image_names']]
+        return [sitk.ReadImage(image_path) for image_path in image_paths]
+
+    @staticmethod
+    def generate_mask(image):
+        """
+        Generates mask for given image, where any 0 in the image is a 0 in the mask, all other values are 1 in the mask.
+
+        Returns
+        -------
+            sitk mask for patient
+        """
+
+        # generate mask for patient, 0s if 0 in image, otherwise 1
+        image_array = sitk.GetArrayFromImage(image)
+        mask_array = np.where(image_array == 0, 0, 1)
+        mask = sitk.GetImageFromArray(mask_array)
+        return mask
+
+    def get_mask(self, patient):
+        """
+        Gets mask for given patient mrn, use if there is a path to the mask specified.
+
+        Returns
+        -------
+            sitk mask for patient
+        """
+
+        # if there is a path to mask file, can modify code below
+        mask_path = os.path.join(self.config['all_files_path'], patient, self.config['file_names']['roi_name'])
+        if os.path.exists(mask_path):
+            mask = sitk.ReadImage(mask_path)
+            # binarize mask
+            mask_array = sitk.GetArrayFromImage(mask)
+            mask_array = np.round(mask_array).astype(int)
+            # mask_array = np.ones(mask_array.shape, np.int8)
+            mask = sitk.GetImageFromArray(mask_array)
+            return mask
+        print(f'No mask found for {patient}')
+
 
     def get_initial_dataset_from_log(self):
         """
@@ -145,18 +199,320 @@ class ActiveLearner():
 
         return all_patients[:self.config["initial_dataset_generator"]["m"]]
 
-    def SIFT3D_initialization(self):
+    def pyradiomics_feature_description(self, patient):
         """
-        Returns an array of m patient mrns that were identified to be most
-        different from each other using the SIFT3D algorithm. The principle
-        behind this is to create a well representative initial dataset using
-        computer vision.
+        Saves feature descriptors using pyradiomics for patient in object's patient_feature_values dict
+
+        Parameters
+        ----------
+        patient : str
+            patient mrn to describe
 
         Returns
         -------
-            list: patient mrns that were identified with SIFT3D
+            adds feature vector to patient_feature_values dictionary, does not return anything
         """
-        pass
+
+        # get image and mask for patient
+        images = self.get_images(patient)
+        masks = [self.generate_mask(image) for image in images]
+
+        # settings used in pyradiomics example
+        settings = {
+            'binWidth': 25,
+            'interpolator': sitk.sitkBSpline,
+            'resampledPixelSpacing': None,
+        }
+
+        # empty list is used to enable all features
+        features_to_enable_dict = {
+            'firstorder': [],
+            # 'glcm': [],
+            # 'glszm': [],
+            # 'glrlm': [],
+            # 'ngtdm': [],
+            # 'gldm': [],
+            # 'shape': [],
+        }
+
+        # find features for each image
+        feature_vectors_list = []
+        for image, mask in zip(images, masks):
+            # using firstorder as default for generating feature vector
+            # there are also several additional features that pyradiomics can calculate
+            feature_descriptors_dict = {
+                'firstorder': firstorder.RadiomicsFirstOrder(image, mask, **settings),
+                # 'glcm': glcm.RadiomicsGLCM(image, mask, **settings),
+                # 'glszm': glszm.RadiomicsGLSZM(image, mask, **settings),
+                # 'glrlm': glrlm.RadiomicsGLRLM(image, mask, **settings),
+                # 'ngtdm': ngtdm.RadiomicsNGTDM(image, mask, **settings),
+                # 'gldm': gldm.RadiomicsGLDM(image, mask, **settings),
+                # 'shape': shape.RadiomicsShape(image, mask, **settings),
+            }
+
+            # initialize dict to store results from feature description
+            feature_results_dict = {}
+
+            # determine maximum number of features for each category, will pad with 0s in array to make uniform size
+            max_num_features = 0
+
+            # calculate features
+            for feature_descriptor_name, feature_descriptor in feature_descriptors_dict.items():
+
+                # enable features as specified in features_to_enable_dict
+                features_to_enable = features_to_enable_dict.get(feature_descriptor_name, [])
+                if not features_to_enable:
+                    feature_descriptor.enableAllFeatures()
+                else:
+                    feature_descriptor.disableAllFeatures()
+                    for feature_to_enable in features_to_enable:
+                        feature_descriptor.enableFeatureByName(feature_to_enable, enable=True)
+
+                # determine num_features to find max_num_features
+                num_features = len(feature_descriptor.enabledFeatures)
+                max_num_features = max(num_features, max_num_features)
+
+                # get results of feature description and store
+                results = feature_descriptor.execute()
+                feature_results_dict[feature_descriptor_name] = results
+
+            # include feature results in array
+            feature_descriptor_vector = np.zeros((len(feature_descriptors_dict), max_num_features))
+            for i, (feature_descriptor_name, results) in enumerate(feature_results_dict.items()):
+                # sort keys so ensure order is preserved
+                results_sorted_keys = sorted(results.keys())
+                # populate array
+                for j in range(len(results)):
+                    results_key = results_sorted_keys[j]
+                    feature_descriptor_vector[i, j] = results[results_key]
+
+            # save patient's feature results
+            feature_vectors_list.append(feature_descriptor_vector)
+        self.patient_feature_values[patient] = np.array(feature_vectors_list)
+
+    def pyradiomics_feature_descriptions(self, patients):
+        """
+        Saves feature descriptors using pyradiomics for patients in object's patient_feature_values dict
+
+        Parameters
+        ----------
+        patients : list
+            patient mrns to describe
+
+        Returns
+        -------
+            adds feature vectors to patient_feature_values dictionary, does not return anything
+        """
+        for patient in patients:
+            self.pyradiomics_feature_description(patient)
+
+    def normalize_feature_values(self):
+        """
+        Populates scaled_patient_feature_values for each patient, normalizing values between 0 and 1.
+
+        Returns
+        -------
+            adds scaled feature vectors to scaled_patient_feature_values dictionary by normalizing values in the range
+            [0, 1], does not return anything
+        """
+        # initialize min and max patient feature values
+        patient_feature_values_array = np.array(list(self.patient_feature_values.values()))
+        min_patient_feature_values = patient_feature_values_array.min(axis=0, initial=None)
+        max_patient_feature_values = patient_feature_values_array.max(axis=0, initial=None)
+
+        # normalize on scale from 0 to 1
+        for patient, patient_feature_values in self.patient_feature_values.items():
+            scaled_patient_feature_values = (patient_feature_values - min_patient_feature_values) / \
+                                           (max_patient_feature_values - min_patient_feature_values)
+            # fill nans with 0.5
+            scaled_patient_feature_values[np.isnan(scaled_patient_feature_values)] = 0.5
+            # save results
+            self.scaled_patient_feature_values[patient] = scaled_patient_feature_values
+
+    def z_score_feature_values(self):
+        """
+        Populates scaled_patient_feature_values for each patient with z-scores.
+
+        Returns
+        -------
+            adds scaled feature vectors to scaled_patient_feature_values dictionary by z-scoring values,
+            does not return anything
+        """
+        # initialize mean and std patient feature values
+        patient_feature_values_array = np.array(list(self.patient_feature_values.values()))
+        mean_patient_feature_values = patient_feature_values_array.mean(axis=0)
+        std_patient_feature_values = patient_feature_values_array.std(axis=0)
+
+        # calculate z scores
+        for patient, patient_feature_values in self.patient_feature_values.items():
+            scaled_patient_feature_values = (patient_feature_values - mean_patient_feature_values) / \
+                                            std_patient_feature_values
+            # fill nans with 0
+            scaled_patient_feature_values[np.isnan(scaled_patient_feature_values)] = 0
+            # save results
+            self.scaled_patient_feature_values[patient] = scaled_patient_feature_values
+
+    @staticmethod
+    def calculate_array_distances(a, b):
+        """
+        Returns the Euclidean distance between two arrays
+
+        Parameters
+        ----------
+        a : array of arrays to find distance from b
+        b : reference array that distances are found from a
+
+        Returns
+        -------
+            array: Euclidean distances of all arrays in a from b
+
+        """
+        return np.sqrt(((np.subtract(a, b)) ** 2).sum(axis=-1))
+
+    def get_feature_distances(self, patient):
+        """
+        Returns a df with distances of patients to ref_patient (given) across different images and feature vectors
+        provided in scaled_patient_feature_values
+
+        Parameters
+        ----------
+        patient : str
+            patient mrn to describe
+
+        Returns
+        -------
+            df: dataframe of columns patient, ref_patient, image_num, feature_vector_num, and distance where patient is
+            the mrn that the distance is calculated from the ref_patient (given) and image_num and feature_vector_num
+            refer to indices of the array of images and feature values for which the distance was calculated
+        """
+
+        # calculate distance to reference patient across all feature vectors
+        ref_patient_values = self.scaled_patient_feature_values[patient]
+        sorted_patients = sorted(self.scaled_patient_feature_values.keys())
+        all_patient_values = np.array([self.scaled_patient_feature_values[sorted_patient]
+                                       for sorted_patient in sorted_patients])
+        array_distances = self.calculate_array_distances(all_patient_values, ref_patient_values)
+
+        # put in dataframe
+        df = pd.DataFrame({
+            'patient': sorted_patients,
+            'ref_patient': patient,
+            'array_distances': list(array_distances),
+        })
+
+        # split array_distances into multiple columns for each image and feature vector
+        num_images = array_distances.shape[1]
+        num_feature_vectors = array_distances.shape[2]
+        for i in range(num_images):
+            for j in range(num_feature_vectors):
+                df[f'image_{i}__feature_vector_{j}'] = df['array_distances'].map(lambda x: x[i, j])
+
+        # reshape
+        df = pd.melt(df, id_vars=['patient', 'ref_patient'],
+                     value_vars=[f'image_{i}__feature_vector_{j}'
+                                 for i in range(num_images) for j in range(num_feature_vectors)],
+                     var_name='image_feature_vector_nums', value_name='distance')
+        df[['image_num', 'feature_vector_num']] = df['image_feature_vector_nums'].str.split('__', expand=True)
+
+        return df[['patient', 'ref_patient', 'image_num', 'feature_vector_num', 'distance']]
+
+    def feature_description_initialization(self, num_rand_patient_mrns=1):
+        """
+        Returns an array of m patient mrns that were identified to be most
+        different from each other using feature description. The principle
+        behind this is to create a well representative initial dataset using
+        computer vision.
+
+        Parameters
+        ----------
+        num_rand_patient_mrns : int
+            the number of patient mrns to randomly select, defaults to 1
+
+        Returns
+        -------
+            list: patient mrns that were identified as being most different from each other
+        """
+
+        # pull number of patients to initialize with from config
+        num_initial_patients_to_find = self.config['initial_dataset_generator']['m']
+
+        # get all patients
+        all_patients = self.get_all_files()
+
+        # return if number of all patients is less than or equal to the number to find
+        if len(all_patients) <= num_initial_patients_to_find:
+            print(f"Number of initial patients to find ({num_initial_patients_to_find}) is greater than or equal to "
+                  f"number of patients for which there are records ({len(all_patients)}). Returning all patients for "
+                  f"which there are records.")
+            return all_patients
+
+        # make sure farthest_metric is appropriate value
+        assert self.config["initial_dataset_generator"]["farthest_metric"] in ["mean", "minimum"], \
+            "Backend for initial dataset generator farthest_metric not recognized"
+
+        # TODO: limit to some number of patients in all_patients with highest entropy as in MedAL paper?
+        # initialize with num_rand_patient_mrns and find patients farthest on average from them
+        print("Setting up initial dataset with patient mrns identified to be most different from each other.")
+        np.random.seed(self.config["random_seed"])
+        random.seed(self.config["random_seed"])
+
+        # generate feature values for patients
+        self.pyradiomics_feature_descriptions(all_patients)
+
+        # scale feature values
+        self.z_score_feature_values()
+
+        # initialize patients with random selection
+        initial_patients = list(np.random.choice(all_patients, size=num_rand_patient_mrns, replace=False))
+
+        # get distances for all patients from initial patients
+        distance_dfs = [self.get_feature_distances(patient=initial_patient)
+                        for initial_patient in initial_patients]
+        distance_df = pd.concat(distance_dfs, axis='rows', ignore_index=True)
+
+        # find farthest patient and add to initial patients, repeat until found enough patients
+        while len(initial_patients) < num_initial_patients_to_find:
+            # only consider distances for patients not already in initial_patients
+            remaining_patient_distance_df = distance_df[~distance_df['patient'].isin(initial_patients)]\
+                .reset_index(drop=True)
+
+            # aggregate distances across ref_patients, then feature_vector_num, then image_num to find farthest patient
+            if self.config["initial_dataset_generator"]["farthest_metric"] == "mean":
+                # find mean distance to all ref patients across all image_num and feature_vector_num
+                remaining_patient_distance_agg_df = remaining_patient_distance_df \
+                    .groupby(['patient', 'image_num', 'feature_vector_num'])[['distance']].mean().reset_index()
+                # find mean distance across all feature_vectors for all images
+                remaining_patient_distance_agg_df = remaining_patient_distance_agg_df \
+                    .groupby(['patient', 'image_num'])[['distance']].mean().reset_index()
+                # find mean distance across all images for each patient
+                remaining_patient_distance_agg_df = remaining_patient_distance_agg_df \
+                    .groupby(['patient'])[['distance']].mean().reset_index()
+            elif self.config["initial_dataset_generator"]["farthest_metric"] == "minimum":
+                # find minimum distance to all ref patients across all image_num and feature_vector_num
+                remaining_patient_distance_agg_df = remaining_patient_distance_df \
+                    .groupby(['patient', 'image_num', 'feature_vector_num'])[['distance']].min().reset_index()
+                # find minimum distance across all feature_vectors for all images
+                remaining_patient_distance_agg_df = remaining_patient_distance_agg_df \
+                    .groupby(['patient', 'image_num'])[['distance']].min().reset_index()
+                # find minimum distance across all images for each patient
+                remaining_patient_distance_agg_df = remaining_patient_distance_agg_df \
+                    .groupby(['patient'])[['distance']].min().reset_index()
+            else:
+                raise ValueError("Backend for initial dataset generator farthest_metric not recognized")
+
+            # add patient farthest away to initial patients (rank is min)
+            farthest_patient = remaining_patient_distance_agg_df.loc[
+                remaining_patient_distance_agg_df['distance'] == remaining_patient_distance_agg_df['distance'].max(),
+                'patient'
+            ].values[0]
+            initial_patients.append(farthest_patient)
+
+            # add farthest_patient as reference patient in distance_df, if need to find more initial patients
+            if len(initial_patients) < num_initial_patients_to_find:
+                farthest_patient_distances_df = self.get_feature_distances(farthest_patient)
+                distance_df = distance_df.append(farthest_patient_distances_df, ignore_index=True)
+
+        return initial_patients
 
     def initial_training_dataset(self):
         """
@@ -169,8 +525,8 @@ class ActiveLearner():
         """
         if self.config["initial_dataset_generator"]["backend"] == "random":
             return self.random_initialization()
-        elif self.config["initial_dataset_generator"]["backend"] == "SIFT3D":
-            return self.SIFT3D_initialization()
+        elif self.config["initial_dataset_generator"]["backend"] == "feature_description_initialization":
+            return self.feature_description_initialization()
         else:
             raise ValueError("Backend for initial dataset generator not recognized")
         
