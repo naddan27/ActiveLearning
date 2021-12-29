@@ -228,12 +228,21 @@ class ActiveLearner():
         return sorted_patients_variances[:,0][-1 * self.config["uncertainty"]["K"]:]
     
     def _get_variance(self, patient):
-        all_labels_for_patient = glob(os.path.join(self.iteration_path, patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+        proportion = self.config["uncertainty"]["variance_pixel_proportion"]
 
-        all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
-        np_all_label_data_for_patient = np.array(all_label_data_for_patient)
-        variance_array = np.var(np_all_label_data_for_patient, 0)
-        mean_variance = np.mean(variance_array)
+        # if variance array is already provided
+        variance_array_path = os.path.join(self.iteration_path, patient, self.config["file_names"]["variance_array"])
+        if os.path.exists(variance_array_path):
+            variance_array = np.array(nib.load(variance_array_path).dataobj)
+        else:
+            all_labels_for_patient = glob(os.path.join(self.iteration_path, patient, self.config["file_names"]["probability_map_name"].split(".nii")[0] + "*"))
+            all_label_data_for_patient = [np.array(nib.load(x).dataobj) for x in all_labels_for_patient]
+            np_all_label_data_for_patient = np.array(all_label_data_for_patient)
+            variance_array = np.var(np_all_label_data_for_patient, axis = 0)
+        flattened = variance_array.flatten()
+        flattened.sort()
+        ncapture = int(len(flattened) * proportion)
+        mean_variance = np.mean(flattened[-1 * ncapture:])
         return mean_variance
 
     def uncertainty_prob_roi(self):
@@ -310,7 +319,7 @@ class ActiveLearner():
         # create a df of all of the unannotated patients and their margins
         sorted_patients_margins = np.array([[pt, v] for v, pt in sorted(zip(margins, unannotated_patients))])
         uncertainty_df = pd.DataFrame(data = sorted_patients_margins, columns = ["Patient_mrn", "Margins"])
-        uncertainty_df["Selected"] = ["Y" for i in range(self.config["uncertainty"]["K"])] + ["N" for i in range(len(unannotated_patients) - self.config["uncertainty"]["K"])]
+        uncertainty_df["Selected"] = ["N" for i in range(len(unannotated_patients) - self.config["uncertainty"]["K"])] + ["Y" for i in range(self.config["uncertainty"]["K"])]
         uncertainty_logger = Logger(self.config)
         uncertainty_logger.write_uncertainty_log(uncertainty_df, "margins")
             
@@ -612,7 +621,7 @@ class Dataset_Builder():
             dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name"])
             shutil.copy(src, dest)
 
-            src = os.path.join(self.iteration_path, x, self.config["file_names"]["prediction_name"])
+            src = os.path.join(self.config['model_predictions_path'], 'iteration_' + str(iteration), x, self.config["file_names"]["prediction_name"])
             dest = os.path.join(dest_patient_path, self.config["file_names"]["roi_name_in_organ_extraction"])
             shutil.copy(src, dest)
 

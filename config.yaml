@@ -9,6 +9,7 @@ file_names:
   roi_name: "t1_label_RAI_RESAMPLED_BINARY-label.nii.gz"
   prediction_name: "tumor-pred-label.nii.gz"
   probability_map_name: "tumor-prob-mask.nii.gz"
+  variance_array: "pred-variance.nii.gz"
 train_dataset_percentage: 0.8
 unique_id: uncertainity_dropout_var
 random_seed: 0
@@ -20,6 +21,7 @@ uncertainty:
   backend: [dropout] #None, bootstrapped, prob_roi, margin, dropout
   switch: [None] #the iteration at which to switch backend, length of switch and backend must match
   if_dropout: variance #variance, max_entropy
+  variance_pixel_proportion: 0.001 
   K: 50 #number of uncertain data samples to collect
   parallel: True
 representativeness: 
