@@ -14,6 +14,7 @@ import yaml
 from sklearn.utils import resample
 import SimpleITK as sitk
 from radiomics import firstorder, glcm, shape, glszm, glrlm, ngtdm, gldm
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 N_BOOTSTRAPPED_MODELS = 4
@@ -113,6 +114,11 @@ class ActiveLearner():
         """
         Gets images for given patient mrn
 
+        Parameters
+        ----------
+        patient : str
+            the patient mrn
+
         Returns
         -------
             list of sitk images for patient
@@ -125,6 +131,11 @@ class ActiveLearner():
     def generate_mask(image):
         """
         Generates mask for given image, where any 0 in the image is a 0 in the mask, all other values are 1 in the mask.
+
+        Parameters
+        ----------
+        image : sitk object
+            the image to generate the mask for
 
         Returns
         -------
@@ -140,6 +151,11 @@ class ActiveLearner():
     def get_mask(self, patient):
         """
         Gets mask for given patient mrn, use if there is a path to the mask specified.
+
+        Parameters
+        ----------
+        patient : str
+            the patient mrn
 
         Returns
         -------
@@ -158,6 +174,22 @@ class ActiveLearner():
             return mask
         print(f'No mask found for {patient}')
 
+    def get_encoded_feature_map(self, patient):
+        """
+        Gets encoded feature map for given patient mrn
+
+        Parameters
+        ----------
+        patient : str
+            the patient mrn
+
+        Returns
+        -------
+            encoded feature map array for patient
+        """
+        encoded_feature_map_path = os.path.join(self.config['all_files_path'], patient,
+                                                self.config['file_names']['encoded_feature_map_name'])
+        return np.load(encoded_feature_map_path)
 
     def get_initial_dataset_from_log(self):
         """
@@ -814,7 +846,127 @@ class ActiveLearner():
         """
         return self.get_x_random_files_from_subset(self.config["representativeness"]["k"], subset, seed = self.config["random_seed"])
 
-    def representativeness_cosine_similarity(self, subset):
+    @staticmethod
+    def flatten_encoded_feature_map(encoded_feature_map):
+        """
+        Returns a flattened encoded feature map by averaging along the last dimension.
+
+        Parameters
+        ----------
+        encoded_feature_map : numpy array
+            array for encoded feature map
+
+        Returns
+        -------
+        numpy array : result of averaging the arrays of the last dimensions of encoded feature map (array of shape
+        (x, y, z) will return an array of length z representing the average of all x*y arrays that have z elements in
+        the last dimension)
+        """
+
+        last_dimension_size = encoded_feature_map.shape[-1]
+        flattened_encoded_feature_map = np.zeros(last_dimension_size)
+        for i in range(last_dimension_size):
+            flattened_encoded_feature_map[i] = encoded_feature_map[..., i].mean()
+        return flattened_encoded_feature_map
+
+    @staticmethod
+    def cosine_similarity_map(patient_encoded_feature_maps):
+        """
+        Returns a dictionary of cosine similarities for each pairwise combination of patients' encoded feature maps
+
+        Parameters
+        ----------
+        patient_encoded_feature_maps : dict
+            dictionary where the key is the patient and the value is the encoded feature map (a numpy array)
+
+        Returns
+        -------
+        dict : dictionary of cosine similarities for each pairwise combination of patients' encoded feature maps, where
+        the key is the patient and the value is another dictionary, which has key of all other patients and value of
+        cosine similarity
+        """
+
+        patients = list(patient_encoded_feature_maps.keys())
+        cosine_similarity_map = {patient: {} for patient in patients}
+
+        for i in range(len(patients)):  # include last patient for self comparison
+            for j in range(i, len(patients)):  # start with i instead of i + 1 to include self comparison
+                patient_1 = patients[i]
+                patient_2 = patients[j]
+
+                encoded_feature_map_1 = patient_encoded_feature_maps[patient_1]
+                encoded_feature_map_2 = patient_encoded_feature_maps[patient_2]
+
+                cosine_similarity_val = cosine_similarity(
+                    encoded_feature_map_1.reshape(1, -1),
+                    encoded_feature_map_2.reshape(1, -1)
+                )[0, 0]
+                cosine_similarity_map[patient_1][patient_2] = cosine_similarity_val
+                cosine_similarity_map[patient_2][patient_1] = cosine_similarity_val
+
+        return cosine_similarity_map
+
+    @staticmethod
+    def find_max_cosine_similarity(patients_tba, patient, encoded_feature_cosine_similarity_map):
+        """
+        Returns the max cosine similarity of all cosine similarities when patient's encoded_feature_map is paired with
+        any encoded feature map of a patient in patients_tba, which is a measure of how well the patient's
+        encoded_feature_map is represented by those of patients_tba
+
+        Parameters
+        ----------
+        patients_tba : list
+            List of patients to be annotated
+        patient : str
+            patient
+        encoded_feature_cosine_similarity_map: dict
+        dictionary of cosine similarities for each pairwise combination of patients' encoded feature maps, where
+        the key is the patient and the value is another dictionary, which has key of all other patients and value of
+        cosine similarity
+
+        Returns
+        -------
+        float : maximum cosine similarity for encoded_feature_map with an element in encoded_feature_maps_tba
+        """
+
+        patients_tba_cosine_similarities = [val for key, val in encoded_feature_cosine_similarity_map[patient].items()
+                                            if key in patients_tba]
+
+        return max(patients_tba_cosine_similarities)
+
+    def calculate_representativeness(self, patients_tba, all_patients, encoded_feature_cosine_similarity_map):
+        """
+        Returns the max cosine similarity of all cosine similarities when patient's encoded_feature_map is paired with
+        any encoded feature map of a patient in patients_tba, which is a measure of how well the patient's
+        encoded_feature_map is represented by those of patients_tba
+
+        Parameters
+        ----------
+        patients_tba : list
+            List of patients to be annotated
+        all_patients : list
+            list of all patients considered for representativeness
+        encoded_feature_cosine_similarity_map: dict
+        dictionary of cosine similarities for each pairwise combination of patients' encoded feature maps, where
+        the key is the patient and the value is another dictionary, which has key of all other patients and value of
+        cosine similarity
+
+        Returns
+        -------
+        float : representativeness from sum of all maximum cosine similarities from encoded feature maps for all
+        patients, where the max cosine similarity is found for each patient in all patients with each patient in
+        the list of patients to be annotated
+        """
+        representativeness = 0
+        for patient in all_patients:
+            max_cosine_similarity = self.find_max_cosine_similarity(patients_tba, patient,
+                                                                    encoded_feature_cosine_similarity_map)
+
+            representativeness += max_cosine_similarity
+
+        return representativeness
+
+    def representativeness_cosine_similarity(self, subset, highest_uncertainty_patient=None):
         """
         Returns an array of k patient mrns from subset that are most representative
         using the cosine similarity function
@@ -822,14 +974,52 @@ class ActiveLearner():
         Parameters
         ----------
         subset : list
-            List of patient mrns to choose from 
+            List of patient mrns to choose from
+        highest_uncertainty_patient : str or None, default is None
+            patient mrn with highest uncertainty
 
         Returns
         -------
-        list : k most representative sampels within subset using the cosine
+        list : k most representative samples within subset using the cosine
             similarity backend
         """
-        pass
+
+        # number of patients from subset to select
+        k = self.config["representativeness"]["k"]
+
+        if len(subset) < k:
+            print(f'subset is too small to select {k} representative samples, returning None')
+            return
+        if len(subset) == k:
+            return subset
+
+        patient_encoded_feature_maps = {patient: self.flatten_encoded_feature_map(self.get_encoded_feature_map(patient))
+                                        for patient in subset}
+        encoded_feature_cosine_similarity_map = self.cosine_similarity_map(patient_encoded_feature_maps)
+        representative_patients = []
+
+        if highest_uncertainty_patient is not None:
+            representative_patients.append(highest_uncertainty_patient)
+        else:
+            random.seed(self.config["random_seed"])
+            representative_patients.append(random.choice(subset))
+        remaining_patients = list(set(subset) - set(representative_patients))
+
+        while len(representative_patients) < k:
+            most_representative_patient = None
+            max_representativeness = None
+            for patient in remaining_patients:
+                temp_representative_patients = representative_patients + [patient]
+                representativeness = self.calculate_representativeness(temp_representative_patients, subset,
+                                                                       encoded_feature_cosine_similarity_map)
+                if max_representativeness is None or representativeness > max_representativeness:
+                    most_representative_patient = patient
+                    max_representativeness = representativeness
+            assert most_representative_patient is not None, 'next most representative patient not found'
+            representative_patients.append(most_representative_patient)
+            remaining_patients = list(set(remaining_patients) - {most_representative_patient})
+
+        return representative_patients
 
     def get_representative_samples(self, subset):
         """
@@ -840,7 +1030,7 @@ class ActiveLearner():
         ----------
         subset : list
             List of patient mrns to choose from
-        
+
         Returns
         -------
         list : k most representative samples within subset
