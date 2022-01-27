@@ -887,7 +887,7 @@ class ActiveLearner():
         """
 
         patients = list(patient_encoded_feature_maps.keys())
-        cosine_similarity_map = {patient: {} for patient in patients}
+        cosine_similarity_map = {patient: dict() for patient in patients}
 
         for i in range(len(patients)):  # include last patient for self comparison
             for j in range(i, len(patients)):  # start with i instead of i + 1 to include self comparison
@@ -929,8 +929,9 @@ class ActiveLearner():
         float : maximum cosine similarity for encoded_feature_map with an element in encoded_feature_maps_tba
         """
 
-        patients_tba_cosine_similarities = [val for key, val in encoded_feature_cosine_similarity_map[patient].items()
-                                            if key in patients_tba]
+        patients_tba_cosine_similarities = [encoded_feature_cosine_similarity_map[patient][patient_tba]
+                                            for patient_tba in patients_tba]
+        assert len(patients_tba_cosine_similarities) == len(patients_tba), 'Some cosine similarities not found'
 
         return max(patients_tba_cosine_similarities)
 
@@ -976,7 +977,7 @@ class ActiveLearner():
         subset : list
             List of patient mrns to choose from
         highest_uncertainty_patient : str or None, default is None
-            patient mrn with highest uncertainty
+            patient mrn with highest uncertainty to initialize with
 
         Returns
         -------
@@ -1020,6 +1021,61 @@ class ActiveLearner():
             remaining_patients = list(set(remaining_patients) - {most_representative_patient})
 
         return representative_patients
+
+    def most_dissimilar_cosine_similarity(self, subset, highest_uncertainty_patient=None):
+        """
+        Returns an array of k patient mrns from subset that are most dissimilar
+        using the cosine similarity function
+
+        Parameters
+        ----------
+        subset : list
+            List of patient mrns to choose from
+        highest_uncertainty_patient : str or None, default is None
+            patient mrn with highest uncertainty to initialize with
+
+        Returns
+        -------
+        list : k most dissimilar samples within subset using cosine similarity
+        """
+
+        # number of patients from subset to select
+        k = self.config["representativeness"]["k"]
+
+        if len(subset) < k:
+            print(f'subset is too small to select {k} representative samples, returning None')
+            return
+        if len(subset) == k:
+            return subset
+
+        patient_encoded_feature_maps = {patient: self.flatten_encoded_feature_map(self.get_encoded_feature_map(patient))
+                                        for patient in subset}
+        encoded_feature_cosine_similarity_map = self.cosine_similarity_map(patient_encoded_feature_maps)
+        most_dissimilar_patients = []
+
+        if highest_uncertainty_patient is not None:
+            most_dissimilar_patients.append(highest_uncertainty_patient)
+        else:
+            random.seed(self.config["random_seed"])
+            most_dissimilar_patients.append(random.choice(subset))
+        remaining_patients = list(set(subset) - set(most_dissimilar_patients))
+
+        while len(most_dissimilar_patients) < k:
+            most_dissimilar_patient = None
+            min_cosine_similarity_score = None
+
+            for patient in remaining_patients:
+                cosine_similarities = [encoded_feature_cosine_similarity_map[patient][dissimilar_patient]
+                                            for dissimilar_patient in most_dissimilar_patients]
+                cosine_similarity_score = sum(cosine_similarities)
+                if min_cosine_similarity_score is None or cosine_similarity_score < min_cosine_similarity_score:
+                    most_dissimilar_patient = patient
+                    min_cosine_similarity_score = cosine_similarity_score
+            assert most_dissimilar_patient is not None, 'next most dissimilar patient not found'
+            most_dissimilar_patients.append(most_dissimilar_patient)
+            remaining_patients = list(set(remaining_patients) - {most_dissimilar_patient})
+
+        return most_dissimilar_patients
 
     def get_representative_samples(self, subset):
         """
