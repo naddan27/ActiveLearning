@@ -1066,7 +1066,7 @@ class ActiveLearner():
 
             for patient in remaining_patients:
                 cosine_similarities = [encoded_feature_cosine_similarity_map[patient][dissimilar_patient]
-                                            for dissimilar_patient in most_dissimilar_patients]
+                                       for dissimilar_patient in most_dissimilar_patients]
                 cosine_similarity_score = sum(cosine_similarities)
                 if min_cosine_similarity_score is None or cosine_similarity_score < min_cosine_similarity_score:
                     most_dissimilar_patient = patient
