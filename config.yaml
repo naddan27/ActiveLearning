@@ -10,6 +10,7 @@ file_names:
   prediction_name: "tumor-pred-label.nii.gz"
   probability_map_name: "tumor-prob-mask.nii.gz"
   variance_array: "pred-variance.nii.gz"
+  encoded_feature_map_name: "encoded-feature-vector.npy"
 train_dataset_percentage: 0.8
 unique_id: uncertainity_dropout_var
 random_seed: 0
@@ -26,7 +27,7 @@ uncertainty:
   K: 50 #number of uncertain data samples to collect
   parallel: True
 representativeness: 
-  backend: [None] #None, cosine_similarity
+  backend: [cosine_similarity] #None, cosine_similarity
   switch: [None] #the iteration at which to switch backend
   k: 50 #number of representative samples to collect
 pseudo_labels:
