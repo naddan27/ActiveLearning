@@ -935,7 +935,7 @@ class ActiveLearner():
 
         return max(patients_tba_cosine_similarities)
 
-    def calculate_representativeness(self, patients_tba, all_patients, encoded_feature_cosine_similarity_map):
+    def calculate_representativeness(self, patients_tba, other_patients, encoded_feature_cosine_similarity_map):
         """
         Returns the max cosine similarity of all cosine similarities when patient's encoded_feature_map is paired with
         any encoded feature map of a patient in patients_tba, which is a measure of how well the patient's
@@ -945,21 +945,21 @@ class ActiveLearner():
         ----------
         patients_tba : list
             List of patients to be annotated
-        all_patients : list
-            list of all patients considered for representativeness
+        other_patients : list
+            list of other patients considered for representativeness
         encoded_feature_cosine_similarity_map: dict
-        dictionary of cosine similarities for each pairwise combination of patients' encoded feature maps, where
-        the key is the patient and the value is another dictionary, which has key of all other patients and value of
-        cosine similarity
+            dictionary of cosine similarities for each pairwise combination of patients' encoded feature maps, where
+            the key is the patient and the value is another dictionary, which has key of all other patients and value of
+            cosine similarity
 
         Returns
         -------
-        float : representativeness from sum of all maximum cosine similarities from encoded feature maps for all
+        float : representativeness from sum of all maximum cosine similarities from encoded feature maps for other
         patients, where the max cosine similarity is found for each patient in all patients with each patient in
         the list of patients to be annotated
         """
         representativeness = 0
-        for patient in all_patients:
+        for patient in other_patients:
             max_cosine_similarity = self.find_max_cosine_similarity(patients_tba, patient,
                                                                     encoded_feature_cosine_similarity_map)
 
@@ -1011,7 +1011,9 @@ class ActiveLearner():
             max_representativeness = None
             for patient in remaining_patients:
                 temp_representative_patients = representative_patients + [patient]
-                representativeness = self.calculate_representativeness(temp_representative_patients, subset,
+                temp_remaining_patients = list(set(subset) - set(temp_representative_patients))
+                representativeness = self.calculate_representativeness(temp_representative_patients,
+                                                                       temp_remaining_patients,
                                                                        encoded_feature_cosine_similarity_map)
                 if max_representativeness is None or representativeness > max_representativeness:
                     most_representative_patient = patient
