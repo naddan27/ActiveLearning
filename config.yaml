@@ -24,7 +24,7 @@ uncertainty:
   switch: [None] #the iteration at which to switch backend, length of switch and backend must match
   if_dropout: variance #variance, max_entropy
   variance_pixel_proportion: 0.001 
-  K: 50 #number of uncertain data samples to collect
+  K: 100 #number of uncertain data samples to collect
   parallel: True
 representativeness: 
   backend: [cosine_similarity] #None, cosine_similarity
