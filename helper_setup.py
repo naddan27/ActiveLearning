@@ -187,8 +187,9 @@ class ActiveLearner():
         -------
             encoded feature map array for patient
         """
-        encoded_feature_map_path = os.path.join(self.config['all_files_path'], patient,
-                                                self.config['file_names']['encoded_feature_map_name'])
+        prev_iteration_str = f"iteration_{int(self.config['active_learning_iteration']) - 1}"
+        encoded_feature_map_path = os.path.join(self.config['model_predictions_path'], prev_iteration_str, patient,
+                                                self.config['representativeness']['encoded_feature_map_name'])
         return np.load(encoded_feature_map_path)
 
     def get_initial_dataset_from_log(self):
