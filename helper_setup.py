@@ -362,6 +362,38 @@ class ActiveLearner():
             # save results
             self.scaled_patient_feature_values[patient] = scaled_patient_feature_values
 
+    @staticmethod
+    def z_score_patient_values_dict(patient_values_dict):
+        """
+        Calculates z-score for dict with patient as key and values as array
+
+        Parameters
+        ----------
+        patient_values_dict : dict
+            dict with patient mrns as keys and values to z_score
+
+        Returns
+        -------
+        dict with scaled values with patient as keys
+
+        """
+
+        scaled_patient_values_dict = {}
+        patient_values_array = np.array(list(patient_values_dict.values()))
+        mean_patient_feature_values = patient_values_array.mean(axis=0)
+        std_patient_feature_values = patient_values_array.std(axis=0)
+
+        # calculate z scores
+        for patient, patient_feature_values in patient_values_dict.items():
+            scaled_patient_feature_values = (patient_feature_values - mean_patient_feature_values) / \
+                                            std_patient_feature_values
+            # fill nans with 0
+            scaled_patient_feature_values[np.isnan(scaled_patient_feature_values)] = 0
+            # save results
+            scaled_patient_values_dict[patient] = scaled_patient_feature_values
+
+        return scaled_patient_values_dict
+
     def z_score_feature_values(self):
         """
         Populates scaled_patient_feature_values for each patient with z-scores.
@@ -371,19 +403,7 @@ class ActiveLearner():
             adds scaled feature vectors to scaled_patient_feature_values dictionary by z-scoring values,
             does not return anything
         """
-        # initialize mean and std patient feature values
-        patient_feature_values_array = np.array(list(self.patient_feature_values.values()))
-        mean_patient_feature_values = patient_feature_values_array.mean(axis=0)
-        std_patient_feature_values = patient_feature_values_array.std(axis=0)
-
-        # calculate z scores
-        for patient, patient_feature_values in self.patient_feature_values.items():
-            scaled_patient_feature_values = (patient_feature_values - mean_patient_feature_values) / \
-                                            std_patient_feature_values
-            # fill nans with 0
-            scaled_patient_feature_values[np.isnan(scaled_patient_feature_values)] = 0
-            # save results
-            self.scaled_patient_feature_values[patient] = scaled_patient_feature_values
+        self.scaled_patient_feature_values = self.z_score_patient_values_dict(self.patient_feature_values)
 
     @staticmethod
     def calculate_array_distances(a, b):
@@ -997,6 +1017,8 @@ class ActiveLearner():
 
         patient_encoded_feature_maps = {patient: self.flatten_encoded_feature_map(self.get_encoded_feature_map(patient))
                                         for patient in subset}
+        if self.config["representativeness"]["z_score"]:
+            patient_encoded_feature_maps = self.z_score_patient_values_dict(patient_encoded_feature_maps)
         encoded_feature_cosine_similarity_map = self.cosine_similarity_map(patient_encoded_feature_maps)
         representative_patients = []
 
