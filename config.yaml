@@ -30,7 +30,8 @@ representativeness:
   switch: [None] #the iteration at which to switch backend
   k: 50 #number of representative samples to collect
   encoded_feature_map_name: "encoded-feature-vector.npy"  # in previous iteration in model_predictions_path
-  z_score: True  # boolean for whether to find z-score for encoded feature map
+  z_score: False  # boolean for whether to find z-score for encoded feature map
+  cosine_similarity_approach: representativeness  # representativeness or dissimilar, for cosine_similarity
 pseudo_labels:
   incorporate: False
   uncertainty_threshold: 1
