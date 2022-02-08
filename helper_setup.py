@@ -1075,6 +1075,8 @@ class ActiveLearner():
 
         patient_encoded_feature_maps = {patient: self.flatten_encoded_feature_map(self.get_encoded_feature_map(patient))
                                         for patient in subset}
+        if self.config["representativeness"]["z_score"]:
+            patient_encoded_feature_maps = self.z_score_patient_values_dict(patient_encoded_feature_maps)
         encoded_feature_cosine_similarity_map = self.cosine_similarity_map(patient_encoded_feature_maps)
         most_dissimilar_patients = []
 
@@ -1135,7 +1137,13 @@ class ActiveLearner():
         if selected_backend == "None":
             return selected_backend, self.representativeness_none(subset)
         elif selected_backend == "cosine_similarity":
-            return selected_backend, self.representativeness_cosine_similarity(subset)
+            approach = self.config["representativeness"]["cosine_similarity_approach"]
+            if approach == 'representativeness':
+                return f'{selected_backend} ({approach})', self.representativeness_cosine_similarity(subset)
+            elif approach == 'dissimilar':
+                return f'{selected_backend} ({approach})', self.most_dissimilar_cosine_similarity(subset)
+            else:
+                raise ValueError(approach + " approach not recognized")
         else:
             raise ValueError(selected_backend + " not recognized")       
 
