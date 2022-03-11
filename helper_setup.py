@@ -188,8 +188,13 @@ class ActiveLearner():
             encoded feature map array for patient
         """
         prev_iteration_str = f"iteration_{int(self.config['active_learning_iteration']) - 1}"
-        encoded_feature_map_path = os.path.join(self.config['model_predictions_path'], prev_iteration_str, patient,
-                                                self.config['representativeness']['encoded_feature_map_name'])
+        if patient in self.get_annotated_files():
+            encoded_feature_map_path = os.path.join(self.config['representativeness']['annotated_predictions_path'],
+                                                    prev_iteration_str, patient,
+                                                    self.config['representativeness']['encoded_feature_map_name'])
+        else:
+            encoded_feature_map_path = os.path.join(self.config['model_predictions_path'], prev_iteration_str, patient,
+                                                    self.config['representativeness']['encoded_feature_map_name'])
         return np.load(encoded_feature_map_path)
 
     def get_initial_dataset_from_log(self):
@@ -1047,7 +1052,8 @@ class ActiveLearner():
 
         return representative_patients
 
-    def most_dissimilar_cosine_similarity(self, subset, highest_uncertainty_patient=None):
+    def most_dissimilar_cosine_similarity(self, subset, highest_uncertainty_patient=None,
+                                          use_previously_annotated=True):
         """
         Returns an array of k patient mrns from subset that are most dissimilar
         using the cosine similarity function
@@ -1058,6 +1064,8 @@ class ActiveLearner():
             List of patient mrns to choose from
         highest_uncertainty_patient : str or None, default is None
             patient mrn with highest uncertainty to initialize with
+        use_previously_annotated: bool, default is True
+            indicates whether or not to consider annotated patients from previous iterations
 
         Returns
         -------
@@ -1073,8 +1081,13 @@ class ActiveLearner():
         if len(subset) == k:
             return subset
 
+        if use_previously_annotated:
+            annotated_patients = self.get_annotated_files()
+        else:
+            annotated_patients = []
+
         patient_encoded_feature_maps = {patient: self.flatten_encoded_feature_map(self.get_encoded_feature_map(patient))
-                                        for patient in subset}
+                                        for patient in list(subset) + annotated_patients}
         if self.config["representativeness"]["z_score"]:
             patient_encoded_feature_maps = self.z_score_patient_values_dict(patient_encoded_feature_maps)
         encoded_feature_cosine_similarity_map = self.cosine_similarity_map(patient_encoded_feature_maps)
@@ -1093,7 +1106,7 @@ class ActiveLearner():
 
             for patient in remaining_patients:
                 cosine_similarities = [encoded_feature_cosine_similarity_map[patient][dissimilar_patient]
-                                       for dissimilar_patient in most_dissimilar_patients]
+                                       for dissimilar_patient in most_dissimilar_patients + annotated_patients]
                 cosine_similarity_score = sum(cosine_similarities)
                 if min_cosine_similarity_score is None or cosine_similarity_score < min_cosine_similarity_score:
                     most_dissimilar_patient = patient

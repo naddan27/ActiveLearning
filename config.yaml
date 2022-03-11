@@ -32,6 +32,7 @@ representativeness:
   encoded_feature_map_name: "encoded-feature-vector.npy"  # in previous iteration in model_predictions_path
   z_score: False  # boolean for whether to find z-score for encoded feature map
   cosine_similarity_approach: representativeness  # representativeness or dissimilar, for cosine_similarity
+  annotated_predictions_path: "/data/t1_pre/for_predictions/annotated_subsets/uncertainity_dropout_var/"
 pseudo_labels:
   incorporate: False
   uncertainty_threshold: 1
